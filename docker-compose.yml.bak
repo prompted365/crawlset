@@ -105,8 +105,6 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     depends_on:
-      milvus-standalone:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:

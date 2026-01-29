@@ -1,456 +1,289 @@
-# Intelligence Pipeline
+# 🕸️ Crawlset
 
-Web intelligence system: crawl, parse, extract, store in RuVector, and monitor websets.
+<div align="center">
 
-## Overview
+**Production-grade web intelligence pipeline that rivals Firecrawl + Exa + Spark**
 
-The Intelligence Pipeline is a comprehensive web intelligence system that provides:
-- Web crawling and content extraction
-- Content parsing and preprocessing
-- LLM-powered enrichment and analysis
-- Vector storage and semantic search via RuVector
-- Webset monitoring and change detection
-- Distributed task processing with Celery
-- Real-time API access
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue.svg)](https://www.typescriptlang.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-## Architecture
+[Features](#-features) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Contributing](#-contributing)
 
-### Components
+</div>
 
-- **Backend**: FastAPI + Celery + Playwright + SQLAlchemy + RuVector client
-- **Frontend**: React + Vite + TypeScript + TailwindCSS
-- **Message Broker**: Redis
-- **Vector Database**: RuVector (git submodule)
-- **Task Queue**: Celery with 3 priority queues (realtime, batch, background)
-- **Monitoring**: Flower (Celery task monitoring)
+---
 
-### Services
+## ⚡ Why Crawlset?
 
-1. **Redis** - Message broker and cache
-2. **Backend** - FastAPI REST API server
-3. **Celery Worker (Realtime)** - High-priority tasks (4 concurrent workers)
-4. **Celery Worker (Batch)** - Batch processing tasks (2 concurrent workers)
-5. **Celery Worker (Background)** - Low-priority background tasks (1 worker)
-6. **Celery Beat** - Periodic task scheduler
-7. **Flower** - Celery monitoring UI
-8. **Frontend** - React application
+Build powerful web intelligence systems without vendor lock-in or API costs. Crawlset combines the best of **Firecrawl's extraction**, **Exa's websets**, and **Spark's distributed processing** into one self-hosted platform.
 
-## Quick Start
+```bash
+# Extract, enrich, and monitor any website
+curl -X POST http://localhost:8000/api/extraction/extract \
+  -d '{"url": "https://news.ycombinator.com"}'
+
+# Set up automated monitoring
+curl -X POST http://localhost:8000/api/monitors \
+  -d '{"webset_id": "...", "cron": "0 */6 * * *", "behavior": "hybrid"}'
+```
+
+## 🎯 Features
+
+### Advanced Web Crawling
+- 🤖 **Anti-bot Detection Bypass** - Playwright with webdriver removal, navigator mocking
+- 🔄 **Proxy Rotation** - Multiple rotation strategies with health checking
+- ⚡ **Rate Limiting** - Per-domain token bucket with exponential backoff
+- 🍪 **Session Management** - Cookie persistence, authentication support
+- 📸 **Screenshot Capture** - Full page and element-specific captures
+
+### Intelligent Extraction
+- 📄 **Content Parsing** - Trafilatura, BeautifulSoup, custom extractors
+- 🎙️ **Podcast Support** - RSS feeds, transcripts, metadata extraction
+- 🏷️ **Structured Data** - Schema.org, Open Graph, JSON-LD
+- 🤖 **LLM Extraction** - Pydantic models, prompt-based extraction
+- 📚 **Citation Tracking** - XPath/CSS selectors with context
+
+### Webset Management
+- 📦 **Collections** - Organize content by topic/entity
+- 🔍 **Hybrid Search** - Milvus vector + BM25 keyword search
+- 🔄 **Deduplication** - SHA256, SimHash, MinHash strategies
+- 💎 **Enrichments** - Company, person, content enrichers with LLM
+- 📊 **Analytics** - Trending topics, insights, entity graphs
+
+### Automated Monitoring
+- ⏰ **Cron Scheduling** - Timezone-aware job execution
+- 🎯 **Behaviors** - Search (find new), Refresh (update existing), Hybrid
+- 📈 **Run History** - Statistics, error tracking, change detection
+- 🔔 **Notifications** - Ready for webhook/email integration
+
+### Distributed Processing
+- 🚀 **Priority Queues** - Realtime, batch, background workers
+- ♻️ **Auto-retry** - Exponential backoff with dead letter queue
+- 📊 **Flower UI** - Real-time task monitoring
+- 🎛️ **Resource Management** - Memory limits, connection pooling
+
+### Vector Storage
+- 🗄️ **Milvus Integration** - Production-grade vector database
+- 🔍 **Hybrid Search** - Semantic + keyword with configurable weighting
+- 🧠 **Embeddings** - sentence-transformers with Redis caching
+- 📈 **Scalable** - Horizontal scaling, distributed deployment
+
+## 🚀 Quick Start
 
 ### Prerequisites
+- Docker & Docker Compose
+- (Optional) Python 3.11+ and Node.js 22+ for local development
 
-- Docker and Docker Compose
-- Git (for submodules)
+### 1-Minute Setup
 
-### Installation
-
-1. Clone the repository with submodules:
 ```bash
-git clone --recursive <repository-url>
-cd intelligence-pipeline
-```
+# Clone the repository
+git clone https://github.com/prompted365/crawlset.git
+cd crawlset
 
-2. Create environment configuration:
-```bash
+# Configure environment
 cp .env.example .env
-```
-
-3. Edit `.env` and add your API keys:
-```bash
-# Required: Add your LLM API key
-REQUESTY_API_KEY=your_key_here
-# Or use OpenAI/Anthropic directly
-OPENAI_API_KEY=your_key_here
-ANTHROPIC_API_KEY=your_key_here
-```
-
-4. Start all services:
-```bash
-docker-compose up -d
-```
-
-5. Check service health:
-```bash
-# Backend API
-curl http://localhost:8000/health
-
-# View logs
-docker-compose logs -f backend
-```
-
-### Service URLs
-
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-- **Frontend**: http://localhost:3000
-- **Flower Monitoring**: http://localhost:5555
-- **Redis**: localhost:6379
-
-## Development
-
-### Project Structure
-
-```
-intelligence-pipeline/
-├── backend/
-│   ├── src/
-│   │   ├── api/          # FastAPI routes and endpoints
-│   │   ├── crawler/      # Web crawling logic
-│   │   ├── parser/       # Content parsing
-│   │   ├── extractors/   # Data extraction
-│   │   ├── enrichments/  # LLM enrichment
-│   │   ├── preprocessing/# Content preprocessing
-│   │   ├── queue/        # Celery tasks and workers
-│   │   ├── database/     # SQLAlchemy models
-│   │   ├── websets/      # Webset management
-│   │   ├── monitors/     # Change detection
-│   │   └── ruvector/     # Vector DB client
-│   ├── tests/
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   ├── package.json
-│   └── Dockerfile
-├── vendor/
-│   └── ruvector/        # Git submodule
-├── data/                # Persistent data
-├── logs/                # Application logs
-├── docker-compose.yml
-├── docker-compose.test.yml
-└── .env.example
-```
-
-### Running Tests
-
-Run the test suite using the test Docker Compose configuration:
-
-```bash
-# Run all tests
-docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
-
-# Run backend tests only
-docker-compose -f docker-compose.test.yml run --rm backend-test pytest
-
-# Run with coverage
-docker-compose -f docker-compose.test.yml run --rm backend-test pytest --cov=src --cov-report=html
-```
-
-### Development Workflow
-
-1. **Start services in development mode**:
-```bash
-docker-compose up -d
-```
-
-2. **View logs**:
-```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f backend
-docker-compose logs -f celery-worker-realtime
-```
-
-3. **Restart a service**:
-```bash
-docker-compose restart backend
-```
-
-4. **Stop all services**:
-```bash
-docker-compose down
-```
-
-5. **Clean up volumes** (WARNING: deletes all data):
-```bash
-docker-compose down -v
-```
-
-### Making Changes
-
-The following directories are mounted as volumes for hot-reloading:
-- `backend/src/` - Backend code changes reload automatically
-- `frontend/src/` - Frontend code changes reload automatically
-- `data/` - Persistent database and vector storage
-- `logs/` - Application logs
-
-## Docker Commands
-
-### Build and Start
-
-```bash
-# Build all services
-docker-compose build
-
-# Build specific service
-docker-compose build backend
+# Edit .env and add your LLM API key (Requesty.ai, OpenAI, or Anthropic)
 
 # Start all services
 docker-compose up -d
 
-# Start with rebuild
-docker-compose up -d --build
-
-# View logs
-docker-compose logs -f [service-name]
+# Check health
+curl http://localhost:8000/health
 ```
 
-### Management
+### Access Points
+- 🎨 **Frontend**: http://localhost:3000
+- 📡 **API Docs**: http://localhost:8000/docs
+- 🌸 **Flower (Tasks)**: http://localhost:5555
+- 🗄️ **Milvus**: localhost:19530
 
-```bash
-# Stop all services
-docker-compose down
+## 📖 Usage Examples
 
-# Stop and remove volumes
-docker-compose down -v
+### Extract Web Content
 
-# Restart service
-docker-compose restart [service-name]
+```python
+# Python SDK
+from crawlset import CrawlsetClient
 
-# Scale workers
-docker-compose up -d --scale celery-worker-realtime=3
+client = CrawlsetClient("http://localhost:8000")
 
-# Execute command in container
-docker-compose exec backend bash
+# Extract content
+job = client.extract("https://example.com")
+result = job.wait()
+
+print(result.title, result.content, result.metadata)
 ```
 
-### Debugging
-
 ```bash
-# View service status
-docker-compose ps
-
-# Check service logs
-docker-compose logs --tail=100 backend
-
-# Follow logs
-docker-compose logs -f celery-worker-realtime
-
-# Inspect container
-docker-compose exec backend bash
-
-# Run Python shell
-docker-compose exec backend python
-
-# Check Celery workers
-docker-compose exec backend celery -A src.queue.celery_app inspect active
-```
-
-## API Usage
-
-### Extract Content from URL
-
-```bash
-curl -X POST "http://localhost:8000/extract" \
+# REST API
+curl -X POST http://localhost:8000/api/extraction/extract \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
 ```
 
-### Create Webset
+### Create and Monitor Webset
 
-```bash
-curl -X POST "http://localhost:8000/websets" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "My Webset",
-    "urls": ["https://example.com"],
-    "enabled": true
-  }'
+```python
+# Create collection
+webset = client.create_webset(
+    name="AI News",
+    search_query="artificial intelligence news 2025",
+    entity_type="article"
+)
+
+# Set up automated monitoring (every 6 hours)
+monitor = client.create_monitor(
+    webset_id=webset.id,
+    cron="0 */6 * * *",
+    behavior="hybrid"  # Search for new + refresh existing
+)
 ```
 
-### Monitor Webset
+### Hybrid Search
 
-```bash
-curl -X POST "http://localhost:8000/websets/{webset_id}/monitor"
+```python
+# Search across all websets
+results = client.search(
+    query="machine learning breakthroughs",
+    mode="hybrid",  # Combines semantic + keyword
+    alpha=0.7,      # 70% semantic, 30% keyword
+    top_k=20
+)
+
+for result in results:
+    print(f"{result.score}: {result.title} - {result.url}")
 ```
 
-See full API documentation at http://localhost:8000/docs
+### Enrich with LLM
 
-## Configuration
+```python
+# Enrich webset items
+client.enrich_webset(
+    webset_id=webset.id,
+    plugins=["company_enricher", "content_enricher"]
+)
 
-### Environment Variables
-
-All configuration is done through environment variables in `.env`:
-
-#### Required Configuration
-- `REQUESTY_API_KEY` or `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` - LLM API key
-- `REDIS_URL` - Redis connection URL
-- `SQLITE_DB` - SQLite database path
-- `RUVECTOR_DATA_DIR` - Vector database directory
-
-#### Optional Configuration
-- `PORT` - Backend port (default: 8000)
-- `LOG_LEVEL` - Logging level (default: INFO)
-- `CELERY_*_CONCURRENCY` - Worker concurrency settings
-- `ENABLE_*` - Feature flags
-
-See `.env.example` for complete configuration options.
-
-### Scaling Workers
-
-Adjust worker concurrency in `docker-compose.yml` or via command line:
-
-```bash
-# Scale realtime workers to 3 instances
-docker-compose up -d --scale celery-worker-realtime=3
-
-# Or modify docker-compose.yml:
-celery-worker-realtime:
-  command: celery -A src.queue.celery_app worker -Q realtime -l info --concurrency=8
+# Get enriched data
+items = client.get_webset_items(webset.id)
+for item in items:
+    print(item.enrichments["summary"])
+    print(item.enrichments["key_points"])
 ```
 
-## Monitoring
+## 🏗️ Architecture
 
-### Flower UI
-
-Access Celery Flower monitoring at http://localhost:5555
-
-Features:
-- Real-time task monitoring
-- Worker status and statistics
-- Task history and results
-- Queue management
-- Worker pool management
-
-### Health Checks
-
-```bash
-# Backend health
-curl http://localhost:8000/health
-
-# Redis health
-docker-compose exec redis redis-cli ping
-
-# Check all services
-docker-compose ps
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Frontend  │────▶│   Backend   │────▶│   Milvus    │
+│  React/TS   │     │   FastAPI   │     │   Vectors   │
+└─────────────┘     └─────────────┘     └─────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐     ┌─────────────┐
+                    │    Redis    │────▶│   Celery    │
+                    │   Broker    │     │   Workers   │
+                    └─────────────┘     └─────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │   SQLite    │
+                    │ Operational │
+                    └─────────────┘
 ```
 
-### Logs
+## 📊 Comparison
 
-```bash
-# View all logs
-docker-compose logs -f
+| Feature | Crawlset | Firecrawl | Exa | Spark |
+|---------|----------|-----------|-----|-------|
+| **Self-hosted** | ✅ | ❌ | ❌ | ✅ |
+| **No API costs** | ✅ | ❌ | ❌ | ✅ |
+| **Anti-bot detection** | ✅ | ✅ | ❌ | ❌ |
+| **LLM extraction** | ✅ | ✅ | ✅ | ❌ |
+| **Webset management** | ✅ | ❌ | ✅ | ❌ |
+| **Hybrid search** | ✅ | ❌ | ✅ | ❌ |
+| **Distributed tasks** | ✅ | ❌ | ❌ | ✅ |
+| **Docker deployment** | ✅ | ❌ | ❌ | ⚠️ Complex |
+| **Graph operations** | ✅ | ❌ | ⚠️ Limited | ❌ |
 
-# View specific service
-docker-compose logs -f backend
+## 📚 Documentation
 
-# View last 100 lines
-docker-compose logs --tail=100 celery-worker-realtime
+- [Quick Start Guide](QUICK_START_GUIDE.md) - Get running in 5 minutes
+- [System Summary](SYSTEM_SUMMARY.md) - Complete feature overview
+- [API Documentation](http://localhost:8000/docs) - Interactive Swagger docs
+- [Milvus Integration](docs/MILVUS_GUIDE.md) - Vector database deep dive
+- [Contributing Guide](CONTRIBUTING.md) - How to contribute
+- [Deployment Guide](DEPLOYMENT.md) - Production deployment
 
-# Export logs
-docker-compose logs > logs/docker-compose.log
-```
+## 🛠️ Technology Stack
 
-## Production Deployment
+**Backend**
+- FastAPI - High-performance async API
+- Playwright - Browser automation
+- Celery - Distributed task queue
+- SQLAlchemy - ORM with SQLite/PostgreSQL
+- Milvus - Vector database
+- sentence-transformers - Embeddings
 
-### Prerequisites
+**Frontend**
+- React 19 - UI framework
+- TypeScript - Type safety
+- Vite - Build tool
+- shadcn/ui - Component library
+- React Query - Server state
 
-1. **Set production environment variables**:
-```bash
-ENVIRONMENT=production
-DEBUG=false
-WORKERS=4
-```
+## 🎯 Use Cases
 
-2. **Use production-grade secrets**:
-```bash
-# Generate secure JWT secret
-openssl rand -hex 32
+- 🔍 **Competitive Intelligence** - Monitor competitor websites, track changes
+- 📰 **News Aggregation** - Collect and organize news from multiple sources
+- 🎙️ **Podcast Research** - Extract transcripts, analyze episodes
+- 🏢 **Lead Generation** - Extract company/person data from web
+- 📚 **Research** - Build searchable knowledge bases
+- 📈 **SEO Analysis** - Track rankings, backlinks, content
+- 🤖 **AI Training** - Collect and curate web data for models
 
-# Update .env with real API keys
-```
+## 🤝 Contributing
 
-3. **Configure reverse proxy** (Nginx/Traefik):
-- SSL/TLS termination
-- Rate limiting
-- WebSocket support for real-time features
-- Static file serving
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-### Production Recommendations
+### Quick Contribution Guide
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests (`docker-compose -f docker-compose.test.yml up`)
+5. Commit (`git commit -m 'Add amazing feature'`)
+6. Push (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
-1. **Database**: Replace SQLite with PostgreSQL for production
-2. **Redis**: Use Redis Sentinel or Cluster for high availability
-3. **Monitoring**: Add Prometheus + Grafana for metrics
-4. **Logging**: Centralize logs with ELK stack or similar
-5. **Backups**: Implement regular backups of data directory
-6. **Secrets**: Use Docker secrets or external secret management
-7. **Resources**: Set memory and CPU limits in docker-compose.yml
+## 📜 License
 
-### Example Nginx Configuration
+MIT License - see [LICENSE](LICENSE) for details.
 
-```nginx
-server {
-    listen 80;
-    server_name intelligence.example.com;
+## 🙏 Acknowledgments
 
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+- [Firecrawl](https://firecrawl.dev) - Inspiration for advanced crawling
+- [Exa](https://exa.ai) - Inspiration for webset management
+- [Milvus](https://milvus.io) - Vector database foundation
+- [Playwright](https://playwright.dev) - Browser automation
+- [FastAPI](https://fastapi.tiangolo.com) - API framework
 
-    location /api {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
+## ⭐ Star History
 
-## Troubleshooting
+[![Star History Chart](https://api.star-history.com/svg?repos=prompted365/crawlset&type=Date)](https://star-history.com/#prompted365/crawlset&Date)
 
-### Common Issues
+## 💬 Community
 
-**Services won't start**:
-```bash
-# Check logs
-docker-compose logs
+- [GitHub Issues](https://github.com/prompted365/crawlset/issues) - Bug reports and feature requests
+- [GitHub Discussions](https://github.com/prompted365/crawlset/discussions) - Questions and discussions
 
-# Rebuild containers
-docker-compose down
-docker-compose up -d --build
-```
+---
 
-**Port conflicts**:
-```bash
-# Change ports in docker-compose.yml or .env
-PORT=8001
-```
+<div align="center">
 
-**Database locked**:
-```bash
-# Stop all services accessing the database
-docker-compose down
-rm data/websets.db
-docker-compose up -d
-```
+**Built with ❤️ by the open source community**
 
-**Celery workers not processing tasks**:
-```bash
-# Check worker status in Flower
-# Restart workers
-docker-compose restart celery-worker-realtime celery-worker-batch celery-worker-background
-```
+[Give us a ⭐](https://github.com/prompted365/crawlset) if you find this project useful!
 
-**Out of memory**:
-```bash
-# Reduce worker concurrency in docker-compose.yml
-# Add memory limits to services
-```
-
-## Contributing
-
-1. Create feature branch
-2. Make changes
-3. Run tests: `docker-compose -f docker-compose.test.yml up`
-4. Submit pull request
-
-## License
-
-[Your License Here]
-
-## Support
-
-For issues and questions, please use the GitHub issue tracker.
+</div>
