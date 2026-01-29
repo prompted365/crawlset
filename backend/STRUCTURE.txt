@@ -1,0 +1,105 @@
+Backend Infrastructure Structure
+================================
+
+backend/
+├── src/
+│   ├── __init__.py                          ✓ Package initialization
+│   │
+│   ├── config.py                            ✓ Configuration management
+│   │   ├── Settings (pydantic-settings)
+│   │   ├── get_settings()
+│   │   └── Environment variable support
+│   │
+│   ├── database/                            ✓ Database layer
+│   │   ├── __init__.py                      ✓ Exports all models & utilities
+│   │   ├── models.py                        ✓ SQLAlchemy async models
+│   │   │   ├── Base (DeclarativeBase)
+│   │   │   ├── Webset
+│   │   │   ├── WebsetItem
+│   │   │   ├── Monitor
+│   │   │   ├── MonitorRun
+│   │   │   └── ExtractionJob
+│   │   └── connection.py                    ✓ Session management
+│   │       ├── DatabaseManager
+│   │       ├── init_database()
+│   │       ├── get_db_manager()
+│   │       └── get_db_session()
+│   │
+│   └── api/                                 ✓ FastAPI application
+│       ├── main.py                          ✓ App with CORS & error handlers
+│       │   ├── Lifespan management
+│       │   ├── CORS middleware
+│       │   ├── Exception handlers
+│       │   ├── Health check endpoint
+│       │   └── Router includes
+│       │
+│       ├── schemas/                         ✓ Pydantic validation schemas
+│       │   ├── __init__.py                  ✓ Schema exports
+│       │   ├── webset.py                    ✓ Webset schemas
+│       │   │   ├── WebsetCreate
+│       │   │   ├── WebsetUpdate
+│       │   │   ├── WebsetResponse
+│       │   │   ├── WebsetItemCreate
+│       │   │   └── WebsetItemResponse
+│       │   ├── monitor.py                   ✓ Monitor schemas
+│       │   │   ├── MonitorCreate
+│       │   │   ├── MonitorUpdate
+│       │   │   ├── MonitorResponse
+│       │   │   ├── MonitorRunCreate
+│       │   │   └── MonitorRunResponse
+│       │   └── extraction.py                ✓ Extraction schemas
+│       │       ├── ExtractionJobCreate
+│       │       ├── ExtractionJobUpdate
+│       │       └── ExtractionJobResponse
+│       │
+│       └── routes/                          (existing)
+│           ├── websets.py
+│           ├── crawl.py
+│           ├── extract.py
+│           └── tools.py
+│
+├── requirements.txt                         ✓ All dependencies
+├── verify_setup.py                          ✓ Validation script
+├── BACKEND_SETUP.md                         ✓ Complete documentation
+└── STRUCTURE.txt                            ✓ This file
+
+Key Features:
+============
+✓ Async/await throughout (AsyncSession, async def)
+✓ Type-safe (mypy compatible)
+✓ CORS configured for frontend
+✓ Error handlers (HTTP & general exceptions)
+✓ Environment-based configuration
+✓ Health check endpoint
+✓ Proper relationships & cascade deletes
+✓ JSON column support for metadata
+✓ Timezone-aware timestamps
+✓ Session lifecycle management
+✓ Pydantic validation on all inputs
+✓ OpenAPI/Swagger docs auto-generated
+
+Database Tables:
+===============
+1. websets           - Webset collections
+2. webset_items      - Items in websets
+3. monitors          - Scheduled monitors
+4. monitor_runs      - Monitor execution history
+5. extraction_jobs   - Extraction task tracking
+
+All tables have proper:
+- Primary keys (TEXT)
+- Foreign keys with CASCADE
+- JSON columns for metadata
+- Timestamps (created_at, updated_at)
+- Indexes (automatic via relationships)
+
+Ready For:
+=========
+✓ Database migrations (Alembic)
+✓ API route implementation
+✓ Frontend integration
+✓ Monitor scheduler
+✓ Celery task queue
+✓ RuVector integration
+✓ Requesty AI integration
+✓ Production deployment

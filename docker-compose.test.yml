@@ -1,0 +1,143 @@
+version: '3.8'
+
+# Docker Compose configuration for testing environment
+# This setup is optimized for running tests in CI/CD or locally
+
+services:
+  # Redis - Message broker and cache for testing
+  redis-test:
+    image: redis:7-alpine
+    container_name: intelligence-redis-test
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    networks:
+      - test-network
+
+  # Backend API - Test mode
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-backend-test
+    ports:
+      - "8001:8000"
+    environment:
+      - PORT=8000
+      - REDIS_URL=redis://redis-test:6379/0
+      - SQLITE_DB=/app/data/test_websets.db
+      - RUVECTOR_DATA_DIR=/app/data/test_ruvector
+      - ENVIRONMENT=test
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      # Use test API keys
+      - REQUESTY_API_KEY=${REQUESTY_API_KEY:-test_key}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-test_key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-test_key}
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/tests:/app/tests
+      - ./data/test:/app/data
+      - ./logs/test:/app/logs
+    depends_on:
+      redis-test:
+        condition: service_healthy
+    command: >
+      sh -c "
+        pytest tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-report=html &&
+        uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+      "
+    networks:
+      - test-network
+
+  # Celery Worker - Test Realtime Queue
+  celery-worker-test-realtime:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-celery-test-realtime
+    command: celery -A src.queue.celery_app worker -Q realtime -l debug --concurrency=2
+    environment:
+      - REDIS_URL=redis://redis-test:6379/0
+      - SQLITE_DB=/app/data/test_websets.db
+      - RUVECTOR_DATA_DIR=/app/data/test_ruvector
+      - ENVIRONMENT=test
+      - DEBUG=true
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+      - ./data/test:/app/data
+      - ./logs/test:/app/logs
+    depends_on:
+      redis-test:
+        condition: service_healthy
+      backend-test:
+        condition: service_started
+    networks:
+      - test-network
+
+  # Celery Worker - Test Batch Queue
+  celery-worker-test-batch:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-celery-test-batch
+    command: celery -A src.queue.celery_app worker -Q batch -l debug --concurrency=1
+    environment:
+      - REDIS_URL=redis://redis-test:6379/0
+      - SQLITE_DB=/app/data/test_websets.db
+      - RUVECTOR_DATA_DIR=/app/data/test_ruvector
+      - ENVIRONMENT=test
+      - DEBUG=true
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+      - ./data/test:/app/data
+      - ./logs/test:/app/logs
+    depends_on:
+      redis-test:
+        condition: service_healthy
+      backend-test:
+        condition: service_started
+    networks:
+      - test-network
+
+  # Frontend - Test build
+  frontend-test:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: intelligence-frontend-test
+    ports:
+      - "3001:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8001
+      - NODE_ENV=test
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/tests:/app/tests
+    depends_on:
+      - backend-test
+    command: >
+      sh -c "
+        npm run build &&
+        npm run preview -- --host 0.0.0.0
+      "
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  test-data:
+  test-logs:

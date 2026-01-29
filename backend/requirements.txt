@@ -1,0 +1,58 @@
+# Core Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.6
+pydantic-settings==2.7.1
+
+# Database
+sqlalchemy==2.0.36
+aiosqlite==0.20.0
+alembic==1.14.0
+
+# Web Scraping & Parsing
+playwright==1.49.1
+beautifulsoup4==4.12.3
+trafilatura==2.0.0
+lxml==5.3.0
+httpx==0.28.1
+aiohttp==3.11.11
+
+# Content Processing
+markdownify==0.14.1
+python-readability==0.3.0
+html2text==2024.2.26
+dateparser==1.2.0
+
+# LLM & AI
+openai==1.59.7
+anthropic==0.42.0
+instructor==1.7.2
+tiktoken==0.8.0
+
+# Task Queue & Scheduling
+celery==5.4.0
+redis==5.2.1
+apscheduler==3.10.4
+kombu==5.4.2
+psutil==6.1.1
+
+# Vector & Search
+hnswlib==0.8.0
+numpy==2.2.1
+sentence-transformers==3.3.1
+scikit-learn==1.5.2
+
+# Utilities
+python-dotenv==1.0.1
+tenacity==9.0.0
+cachetools==5.5.0
+python-multipart==0.0.20
+python-jose[cryptography]==3.3.0
+passlib==1.7.4
+
+# Development
+pytest==8.3.4
+pytest-asyncio==0.24.0
+black==24.10.0
+ruff==0.8.5
+mypy==1.14.0

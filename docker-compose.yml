@@ -1,0 +1,203 @@
+version: '3.8'
+
+services:
+  # Redis - Message broker and cache
+  redis:
+    image: redis:7-alpine
+    container_name: intelligence-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - intelligence-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - SQLITE_DB=/app/data/websets.db
+      - RUVECTOR_DATA_DIR=/app/data/ruvector
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - intelligence-network
+
+  # Celery Worker - Realtime Queue
+  celery-worker-realtime:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-celery-realtime
+    command: celery -A src.queue.celery_app worker -Q realtime -l info --concurrency=4
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SQLITE_DB=/app/data/websets.db
+      - RUVECTOR_DATA_DIR=/app/data/ruvector
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - intelligence-network
+
+  # Celery Worker - Batch Queue
+  celery-worker-batch:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-celery-batch
+    command: celery -A src.queue.celery_app worker -Q batch -l info --concurrency=2
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SQLITE_DB=/app/data/websets.db
+      - RUVECTOR_DATA_DIR=/app/data/ruvector
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - intelligence-network
+
+  # Celery Worker - Background Queue
+  celery-worker-background:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-celery-background
+    command: celery -A src.queue.celery_app worker -Q background -l info --concurrency=1
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SQLITE_DB=/app/data/websets.db
+      - RUVECTOR_DATA_DIR=/app/data/ruvector
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - intelligence-network
+
+  # Celery Beat - Periodic Tasks Scheduler
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-celery-beat
+    command: celery -A src.queue.celery_app beat -l info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - SQLITE_DB=/app/data/websets.db
+      - RUVECTOR_DATA_DIR=/app/data/ruvector
+    env_file:
+      - .env
+    volumes:
+      - ./backend/src:/app/src
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - intelligence-network
+
+  # Flower - Celery Monitoring UI
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligence-flower
+    command: celery -A src.queue.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - intelligence-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: intelligence-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - intelligence-network
+
+networks:
+  intelligence-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  app-data:
+  app-logs:

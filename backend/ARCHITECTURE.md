@@ -1,0 +1,528 @@
+# Webset System Architecture
+
+## High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Intelligence Pipeline                          │
+│                                                                           │
+│  ┌────────────────────────────────────────────────────────────────┐    │
+│  │                        FastAPI Backend                          │    │
+│  │                                                                  │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │    │
+│  │  │   Websets    │  │   Monitors   │  │ Enrichments  │         │    │
+│  │  │              │  │              │  │              │         │    │
+│  │  │  • Manager   │  │  • Scheduler │  │  • Engine    │         │    │
+│  │  │  • Search    │  │  • Behaviors │  │  • Plugins   │         │    │
+│  │  │  • Dedupe    │  │  • Executor  │  │  • Cache     │         │    │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘         │    │
+│  │         │                 │                   │                 │    │
+│  │         └─────────────────┴───────────────────┘                 │    │
+│  │                           │                                      │    │
+│  └───────────────────────────┼──────────────────────────────────────┘    │
+│                              │                                           │
+│         ┌────────────────────┼────────────────────┐                     │
+│         │                    │                    │                     │
+│    ┌────▼────┐         ┌────▼────┐         ┌────▼────┐                │
+│    │SQLAlchemy│        │RuVector │         │   LLM   │                │
+│    │ SQLite  │        │ Vector  │         │  APIs   │                │
+│    │   DB    │        │  Store  │         │(OpenAI) │                │
+│    └─────────┘         └─────────┘         └─────────┘                │
+│                                                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Component Architecture
+
+### 1. Websets Module
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Websets Module                         │
+├──────────────────────────────────────────────────────────┤
+│                                                           │
+│  WebsetManager                                            │
+│  ├─ create_webset()     ──────┐                         │
+│  ├─ add_item()                 │                         │
+│  ├─ create_monitor()           ▼                         │
+│  └─ record_monitor_run()   ┌──────────────┐             │
+│                             │  SQLAlchemy  │             │
+│  SearchExecutor             │   Models     │             │
+│  ├─ execute_search()        │              │             │
+│  ├─ crawl_urls()           │  • Webset    │             │
+│  └─ deduplicate()          │  • Item      │             │
+│                             │  • Monitor   │             │
+│  ContentDeduplicator        │  • Run       │             │
+│  ├─ compute_hash()         └──────┬───────┘             │
+│  ├─ is_duplicate()                │                      │
+│  └─ simhash/minhash              ▼                      │
+│                             ┌──────────────┐             │
+│  URLDeduplicator            │   Database   │             │
+│  ├─ normalize_url()        │  (SQLite)    │             │
+│  └─ deduplicate_urls()     └──────────────┘             │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 2. Monitors Module
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Monitors Module                        │
+├──────────────────────────────────────────────────────────┤
+│                                                           │
+│  MonitorScheduler (APScheduler)                          │
+│  ├─ initialize()                                         │
+│  ├─ add_monitor_job()    ┌────────────────┐             │
+│  ├─ remove_monitor_job() │  Job Store     │             │
+│  └─ start()              │  (SQLite)      │             │
+│          │               └────────────────┘             │
+│          ├──────────┬──────────┬──────────┐             │
+│          ▼          ▼          ▼          ▼             │
+│    ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐     │
+│    │ Search  │ │Refresh  │ │ Hybrid  │ │ Custom  │     │
+│    │Behavior │ │Behavior │ │Behavior │ │Behavior │     │
+│    └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘     │
+│         │           │           │           │           │
+│         └───────────┴───────────┴───────────┘           │
+│                     │                                    │
+│                     ▼                                    │
+│          MonitorExecutor                                 │
+│          ├─ execute_monitor()                           │
+│          ├─ handle_errors()                             │
+│          ├─ record_results()                            │
+│          └─ retry_failed()                              │
+│                     │                                    │
+│                     ▼                                    │
+│          ┌─────────────────┐                            │
+│          │ BehaviorResult  │                            │
+│          │ • items_added   │                            │
+│          │ • items_updated │                            │
+│          │ • errors        │                            │
+│          └─────────────────┘                            │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 3. Enrichments Module
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   Enrichments Module                      │
+├──────────────────────────────────────────────────────────┤
+│                                                           │
+│  EnrichmentEngine                                         │
+│  ├─ register_plugin()                                    │
+│  ├─ enrich()              ┌─────────────────┐            │
+│  └─ enrich_batch()        │ Plugin Registry │            │
+│          │                 └────────┬────────┘            │
+│          │                          │                     │
+│          ├──────────┬───────────────┼────────┐            │
+│          ▼          ▼               ▼        ▼            │
+│    ┌─────────┐ ┌─────────┐   ┌─────────┐ ┌─────────┐    │
+│    │Company  │ │ Person  │   │Content  │ │ Custom  │    │
+│    │Enricher │ │Enricher │   │Enricher │ │ Plugin  │    │
+│    └────┬────┘ └────┬────┘   └────┬────┘ └────┬────┘    │
+│         │           │             │           │          │
+│         ├───────────┴─────────────┴───────────┘          │
+│         │                                                 │
+│         ▼                                                 │
+│  EnrichmentResult                                         │
+│  ├─ plugin_name                                          │
+│  ├─ success                                              │
+│  ├─ data                                                 │
+│  └─ error                                                │
+│                                                           │
+│  CachedEnrichmentEngine                                   │
+│  ├─ EnrichmentCache (LRU)                                │
+│  └─ get/set cached results                               │
+│                                                           │
+└──────────────────────────────────────────────────────────┘
+```
+
+## Data Flow Diagrams
+
+### Search Behavior Flow
+
+```
+┌────────┐
+│ Monitor│
+│Scheduler│
+└───┬────┘
+    │ Trigger (cron)
+    ▼
+┌────────────┐
+│  Monitor   │
+│  Executor  │
+└─────┬──────┘
+      │ Load config
+      ▼
+┌────────────┐
+│   Search   │
+│  Behavior  │
+└─────┬──────┘
+      │
+      ├──1. Execute Search Query──┐
+      │                            ▼
+      │                      ┌──────────┐
+      │                      │ RuVector │
+      │                      │  Search  │
+      │                      └─────┬────┘
+      │                            │
+      ├──2. Crawl URLs ◄───────────┘
+      │         │
+      │         ▼
+      │   ┌──────────┐
+      │   │ Crawler  │
+      │   └─────┬────┘
+      │         │
+      ├──3. Deduplicate◄──────────┘
+      │         │
+      │         ▼
+      │   ┌──────────┐
+      │   │  Dedupe  │
+      │   └─────┬────┘
+      │         │
+      ├──4. Add Items◄─────────────┘
+      │         │
+      │         ▼
+      │   ┌──────────┐
+      │   │ Database │
+      │   └─────┬────┘
+      │         │
+      └──5. Store RuVector◄────────┘
+            │
+            ▼
+      ┌──────────┐
+      │ RuVector │
+      │  Store   │
+      └──────────┘
+```
+
+### Refresh Behavior Flow
+
+```
+┌────────┐
+│ Monitor│
+│Scheduler│
+└───┬────┘
+    │ Trigger
+    ▼
+┌────────────┐
+│  Refresh   │
+│  Behavior  │
+└─────┬──────┘
+      │
+      ├──1. Load Items───┐
+      │                  ▼
+      │            ┌──────────┐
+      │            │ Database │
+      │            └─────┬────┘
+      │                  │
+      ├──2. Re-crawl◄────┘
+      │         │
+      │         ▼
+      │   ┌──────────┐
+      │   │ Crawler  │
+      │   └─────┬────┘
+      │         │
+      ├──3. Compare◄──────┘
+      │         │
+      │         ▼
+      │   ┌──────────┐
+      │   │  Dedupe  │
+      │   └─────┬────┘
+      │         │
+      │         ├──Changed?──Yes──┐
+      │         │                 │
+      │         No                ▼
+      │         │           ┌──────────┐
+      │         │           │  Update  │
+      │         │           │   Item   │
+      │         │           └─────┬────┘
+      │         │                 │
+      ├──4. Enrich◄────────────────┘
+      │         │
+      │         ▼
+      │   ┌──────────┐
+      │   │Enrichment│
+      │   │  Engine  │
+      │   └─────┬────┘
+      │         │
+      └──5. Update RuVector◄───┘
+            │
+            ▼
+      ┌──────────┐
+      │ RuVector │
+      └──────────┘
+```
+
+### Enrichment Pipeline Flow
+
+```
+┌──────────┐
+│  Content │
+└─────┬────┘
+      │
+      ▼
+┌──────────────┐
+│ Enrichment   │
+│   Engine     │
+└──────┬───────┘
+       │
+       ├──Plugin 1──┐
+       │            ▼
+       │      ┌──────────┐
+       │      │  Company │
+       │      │ Enricher │
+       │      └─────┬────┘
+       │            │
+       ├──Plugin 2──┤
+       │            ▼
+       │      ┌──────────┐
+       │      │  Person  │
+       │      │ Enricher │
+       │      └─────┬────┘
+       │            │
+       ├──Plugin 3──┤
+       │            ▼
+       │      ┌──────────┐
+       │      │  Content │
+       │      │ Enricher │
+       │      └─────┬────┘
+       │            │
+       └────────────┴──────┐
+                           │
+                           ▼
+                  ┌─────────────────┐
+                  │ Enriched Results│
+                  │  • Company data │
+                  │  • Person data  │
+                  │  • Summary      │
+                  └────────┬────────┘
+                           │
+                           ▼
+                  ┌─────────────────┐
+                  │  Store Results  │
+                  │  in Database    │
+                  └─────────────────┘
+```
+
+## Database Schema Diagram
+
+```
+┌─────────────────┐         ┌──────────────────┐
+│    websets      │         │   webset_items   │
+├─────────────────┤         ├──────────────────┤
+│ id (PK)         │◄────────│ id (PK)          │
+│ name            │         │ webset_id (FK)   │
+│ search_query    │         │ url              │
+│ search_criteria │         │ title            │
+│ entity_type     │         │ content          │
+│ created_at      │         │ content_hash     │
+│ updated_at      │         │ metadata (JSON)  │
+└────────┬────────┘         │ enrichments(JSON)│
+         │                  │ ruvector_doc_id  │
+         │                  │ last_crawled_at  │
+         │                  │ created_at       │
+         │                  └──────────────────┘
+         │
+         │
+         │         ┌─────────────────┐
+         └─────────┤    monitors     │
+                   ├─────────────────┤
+                   │ id (PK)         │
+                   │ webset_id (FK)  │
+                   │ cron_expression │
+                   │ timezone        │
+                   │ behavior_type   │
+                   │ behavior_config │
+                   │ status          │
+                   │ last_run_at     │
+                   └────────┬────────┘
+                            │
+                            │
+                   ┌────────▼────────┐
+                   │  monitor_runs   │
+                   ├─────────────────┤
+                   │ id (PK)         │
+                   │ monitor_id (FK) │
+                   │ status          │
+                   │ items_added     │
+                   │ items_updated   │
+                   │ started_at      │
+                   │ completed_at    │
+                   │ error_message   │
+                   └─────────────────┘
+```
+
+## Sequence Diagram: Complete Workflow
+
+```
+User          API         Manager      Scheduler    Behavior     Enricher     Database
+ │             │             │             │            │            │            │
+ │─Create────► │             │             │            │            │            │
+ │  Webset     │─create_────►│             │            │            │            │
+ │             │  webset()   │─INSERT─────────────────────────────────────────────►│
+ │             │             │◄────────────────────────────────────────────────────│
+ │             │◄────────────│             │            │            │            │
+ │◄────────────│             │             │            │            │            │
+ │             │             │             │            │            │            │
+ │─Create────► │             │             │            │            │            │
+ │  Monitor    │─create_────►│             │            │            │            │
+ │             │  monitor()  │─INSERT─────────────────────────────────────────────►│
+ │             │             │◄────────────────────────────────────────────────────│
+ │             │             │─add_job────►│            │            │            │
+ │             │             │◄────────────│            │            │            │
+ │             │◄────────────│             │            │            │            │
+ │◄────────────│             │             │            │            │            │
+ │             │             │             │            │            │            │
+ │             │             │             │──trigger──►│            │            │
+ │             │             │             │  (cron)    │            │            │
+ │             │             │             │            │─execute───►│            │
+ │             │             │             │            │  search()  │            │
+ │             │             │             │            │◄───────────│            │
+ │             │             │             │            │            │            │
+ │             │             │             │            │─crawl()────►            │
+ │             │             │             │            │◄─────────── │            │
+ │             │             │             │            │            │            │
+ │             │             │             │            │─dedupe()───►│            │
+ │             │             │             │            │◄────────────│            │
+ │             │             │             │            │            │            │
+ │             │             │             │            │─enrich()───────────────► │
+ │             │             │             │            │◄─────────────────────────│
+ │             │             │             │            │            │            │
+ │             │             │             │            │─add_items()─────────────►│
+ │             │             │             │            │◄─────────────────────────│
+ │             │             │             │            │            │            │
+ │             │             │             │            │─record_run()─────────────►│
+ │             │             │             │            │◄─────────────────────────│
+ │             │             │             │◄───────────│            │            │
+ │             │             │             │            │            │            │
+```
+
+## Deployment Architecture
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│                      Production Environment                    │
+├───────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────┐         ┌─────────────────┐              │
+│  │  FastAPI App    │         │   Scheduler     │              │
+│  │  (Port 8000)    │         │  (Background)   │              │
+│  │                 │         │                 │              │
+│  │  • REST API     │         │  • APScheduler  │              │
+│  │  • WebSockets   │         │  • Job Executor │              │
+│  └────────┬────────┘         └────────┬────────┘              │
+│           │                           │                        │
+│           └───────────┬───────────────┘                        │
+│                       │                                        │
+│            ┌──────────▼──────────┐                            │
+│            │   SQLite Database   │                            │
+│            │                     │                            │
+│            │  • websets.db       │                            │
+│            │  • scheduler.db     │                            │
+│            └─────────────────────┘                            │
+│                                                                 │
+│            ┌─────────────────────┐                            │
+│            │   RuVector Store    │                            │
+│            │                     │                            │
+│            │  • Vector indexes   │                            │
+│            │  • Graph data       │                            │
+│            └─────────────────────┘                            │
+│                                                                 │
+│            ┌─────────────────────┐                            │
+│            │   External APIs     │                            │
+│            │                     │                            │
+│            │  • OpenAI           │                            │
+│            │  • Anthropic        │                            │
+│            └─────────────────────┘                            │
+│                                                                 │
+└───────────────────────────────────────────────────────────────┘
+```
+
+## Scalability Architecture
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│                    Scaled Production Setup                     │
+├───────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌────────────────┐         ┌────────────────┐                │
+│  │  Load Balancer │         │  Redis Cache   │                │
+│  └───────┬────────┘         └────────┬───────┘                │
+│          │                           │                         │
+│     ┌────┴────┬────────┬────────┐   │                         │
+│     ▼         ▼        ▼        ▼   │                         │
+│  ┌────┐   ┌────┐   ┌────┐   ┌────┐ │                         │
+│  │API │   │API │   │API │   │API │ │                         │
+│  │ 1  │   │ 2  │   │ 3  │   │ 4  │ │                         │
+│  └─┬──┘   └─┬──┘   └─┬──┘   └─┬──┘ │                         │
+│    │        │        │        │     │                         │
+│    └────────┴────────┴────────┴─────┘                         │
+│                      │                                         │
+│            ┌─────────▼──────────┐                             │
+│            │  PostgreSQL DB     │                             │
+│            │  (Replicated)      │                             │
+│            └─────────────────────┘                             │
+│                                                                 │
+│  ┌────────────────────────────────┐                           │
+│  │     Celery Workers (N)         │                           │
+│  │  ┌────┐  ┌────┐  ┌────┐       │                           │
+│  │  │W 1 │  │W 2 │  │W N │       │                           │
+│  │  └────┘  └────┘  └────┘       │                           │
+│  └────────────┬───────────────────┘                           │
+│               │                                                │
+│      ┌────────▼───────────┐                                   │
+│      │   Message Queue    │                                   │
+│      │   (Redis/RabbitMQ) │                                   │
+│      └────────────────────┘                                   │
+│                                                                 │
+└───────────────────────────────────────────────────────────────┘
+```
+
+## Technology Stack
+
+```
+┌────────────────────────────────────────────────────────┐
+│                    Technology Stack                     │
+├────────────────────────────────────────────────────────┤
+│                                                          │
+│  Backend Framework                                       │
+│  └─ FastAPI (async web framework)                       │
+│                                                          │
+│  Database Layer                                          │
+│  ├─ SQLAlchemy (ORM)                                    │
+│  ├─ aiosqlite (async SQLite driver)                     │
+│  └─ SQLite / PostgreSQL                                 │
+│                                                          │
+│  Scheduling                                              │
+│  └─ APScheduler (job scheduling)                        │
+│                                                          │
+│  Web Scraping                                            │
+│  ├─ httpx (async HTTP client)                           │
+│  ├─ playwright (browser automation)                     │
+│  ├─ trafilatura (content extraction)                    │
+│  └─ beautifulsoup4 (HTML parsing)                       │
+│                                                          │
+│  Vector Store                                            │
+│  └─ RuVector (hybrid search)                            │
+│                                                          │
+│  AI/ML                                                   │
+│  ├─ OpenAI API                                          │
+│  ├─ Anthropic API                                       │
+│  └─ Instructor (structured extraction)                  │
+│                                                          │
+│  Task Queue (Optional)                                   │
+│  ├─ Celery (distributed tasks)                          │
+│  └─ Redis (message broker)                              │
+│                                                          │
+│  Testing                                                 │
+│  ├─ pytest                                              │
+│  └─ pytest-asyncio                                      │
+│                                                          │
+└────────────────────────────────────────────────────────┘
+```
+
+This architecture provides a scalable, maintainable, and extensible foundation for the webset management system.
