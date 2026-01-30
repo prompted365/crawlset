@@ -1,4 +1,4 @@
-# Quick Start Guide - Intelligence Pipeline
+# Quick Start Guide - Crawlset
 
 Get up and running in 5 minutes.
 
@@ -14,7 +14,7 @@ Get up and running in 5 minutes.
 
 ```bash
 # Backend
-cd /Users/breydentaylor/operationTorque/intelligence-pipeline/backend
+cd ./backend
 pip install -r requirements.txt
 playwright install chromium chromium-deps
 
@@ -32,7 +32,7 @@ docker run -d --name intelligence-redis -p 6379:6379 redis:7-alpine
 ### 3. Configure Environment
 
 ```bash
-cd /Users/breydentaylor/operationTorque/intelligence-pipeline
+cd crawlset
 cp .env.example .env
 ```
 
@@ -56,19 +56,19 @@ Open 3 terminal windows:
 
 **Terminal 1 - Backend**:
 ```bash
-cd /Users/breydentaylor/operationTorque/intelligence-pipeline/backend
+cd ./backend
 uvicorn src.api.main:app --reload --port 8000
 ```
 
 **Terminal 2 - Celery Worker**:
 ```bash
-cd /Users/breydentaylor/operationTorque/intelligence-pipeline/backend
+cd ./backend
 celery -A src.queue.celery_app worker -Q realtime,batch,background -l info
 ```
 
 **Terminal 3 - Frontend**:
 ```bash
-cd /Users/breydentaylor/operationTorque/intelligence-pipeline/frontend
+cd ./frontend
 npm run dev
 ```
 
@@ -267,7 +267,7 @@ print(f"Found {len(result['people'])} people")
 ```python
 import asyncio
 from src.websets import WebsetManager
-from src.ruvector import create_client
+from src.milvus import create_client
 
 async def create_ai_companies_webset():
     # Initialize
@@ -400,7 +400,7 @@ redis-cli ping
 
 ```bash
 # Ensure you're in the backend directory
-cd /Users/breydentaylor/operationTorque/intelligence-pipeline/backend
+cd ./backend
 
 # Run Python from backend directory
 python -c "from src.api.main import app; print('OK')"

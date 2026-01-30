@@ -105,5 +105,8 @@ coverage.xml
 *.o
 *.a
 
+# Backup files
+*.bak
+
 # Docker override (local dev)
 docker-compose.override.yml

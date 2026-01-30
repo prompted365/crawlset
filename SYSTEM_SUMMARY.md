@@ -1,4 +1,4 @@
-# Intelligence Pipeline - Complete System Summary
+# Crawlset - Complete System Summary
 
 **Production-Grade Web Intelligence Platform**
 *Rivaling Firecrawl + Exa Websets + Spark-v1 Combined*
@@ -24,7 +24,7 @@ A fully-featured, self-hosted web intelligence extraction and monitoring system 
 - **Playwright** - Advanced browser automation with anti-bot detection
 - **Celery** - Distributed task queue with Redis
 - **APScheduler** - Cron-based monitoring
-- **RuVector** - Vector database with hybrid search
+- **Milvus** - Vector database with hybrid search
 - **Trafilatura** - Content extraction
 - **sentence-transformers** - Embeddings generation
 
@@ -138,10 +138,10 @@ A fully-featured, self-hosted web intelligence extraction and monitoring system 
 - Webset versioning and history
 - Automatic metadata tracking
 - Transaction support
-- RuVector integration for vector storage
+- Milvus integration for vector storage
 
 **Search Executor** (`src/websets/search.py`)
-- RuVector hybrid search (semantic + keyword)
+- Milvus hybrid search (semantic + keyword)
 - Concurrent URL crawling with semaphore limiting
 - Query optimization and builder
 - Result ranking and filtering
@@ -232,8 +232,8 @@ A fully-featured, self-hosted web intelligence extraction and monitoring system 
 
 ### 8. Vector Database & Search
 
-**RuVector Integration** (`src/ruvector/`)
-- **Client** (`client.py`): Full async RuVector client with HNSW indexing
+**Milvus Integration** (`src/milvus/`)
+- **Client** (`client.py`): Full async Milvus client with HNSW indexing
 - **Embedder** (`embedder.py`): sentence-transformers with Redis caching
 - **Search** (`search.py`): Hybrid search (BM25 + vector) with RRF fusion
 - **Graph** (`graph.py`): Knowledge graph operations, clustering, path finding
@@ -393,7 +393,7 @@ docker-compose up -d
 - **CRAWLER_README.md** - Crawler module documentation
 - **WEBSETS_README.md** - Webset system guide
 - **INTEGRATION_GUIDE.md** - FastAPI integration
-- **RUVECTOR_INTEGRATION.md** - Vector database guide
+- **MILVUS_GUIDE.md** - Vector database guide
 - **DISTRIBUTED_PROCESSING.md** - Task queue system
 - **API_ROUTES.md** - API endpoint specifications
 - **FRONTEND_COMPONENTS.md** - Component library

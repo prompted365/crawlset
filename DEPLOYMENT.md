@@ -2,7 +2,7 @@
 
 ## Docker Compose Setup
 
-Create at `/Users/breydentaylor/operationTorque/intelligence-pipeline/docker-compose.yml`
+Docker Compose configuration is in the project root `docker-compose.yml`.
 
 ### Services
 
@@ -84,7 +84,7 @@ Create with all necessary variables:
 - Database URLs
 - Redis URL
 - API keys (Requesty, OpenAI, Anthropic)
-- RuVector settings
+- Milvus settings
 - Security settings
 
 ## Production Considerations

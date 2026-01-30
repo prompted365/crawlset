@@ -1,4 +1,4 @@
-# ✅ Intelligence Pipeline - COMPLETE
+# ✅ Crawlset - COMPLETE
 
 ## 🎉 System Status: **PRODUCTION READY**
 
@@ -11,7 +11,7 @@ Your advanced web intelligence extraction and monitoring system is fully built a
 - ✅ **35+ modules** covering all functionality
 - ✅ **50+ API endpoints** with full CRUD operations
 - ✅ **SQLite database** with 5 comprehensive tables
-- ✅ **RuVector integration** for hybrid vector search
+- ✅ **Milvus integration** for hybrid vector search
 - ✅ **Celery task queue** with 3 priority levels
 - ✅ **Advanced web crawler** with Playwright, anti-bot detection, proxy support
 - ✅ **Content parsers** for HTML, metadata, podcasts, citations
@@ -98,7 +98,7 @@ Your advanced web intelligence extraction and monitoring system is fully built a
 - Health monitoring
 
 ### 7. Vector Search
-- RuVector with HNSW indexing
+- Milvus with HNSW indexing
 - Hybrid search (BM25 + vector similarity)
 - sentence-transformers embeddings
 - Redis caching for computed embeddings
@@ -116,7 +116,7 @@ Your advanced web intelligence extraction and monitoring system is fully built a
 ## 📂 Project Structure
 
 ```
-intelligence-pipeline/
+crawlset/
 ├── backend/
 │   ├── src/
 │   │   ├── api/              # FastAPI routes and schemas
@@ -127,7 +127,7 @@ intelligence-pipeline/
 │   │   ├── monitors/         # Cron monitoring
 │   │   ├── enrichments/      # Enrichment plugins
 │   │   ├── queue/            # Celery tasks
-│   │   ├── ruvector/         # Vector storage
+│   │   ├── milvus/           # Vector storage
 │   │   ├── preprocessing/    # Content processing
 │   │   └── database/         # SQLAlchemy models
 │   ├── requirements.txt      # Python dependencies
@@ -156,7 +156,7 @@ intelligence-pipeline/
 
 ```bash
 # 1. Setup environment
-cd /Users/breydentaylor/operationTorque/intelligence-pipeline
+cd .
 cp .env.example .env
 # Edit .env with your API keys
 
@@ -186,7 +186,7 @@ npm run dev
 
 ```bash
 # 1. Setup environment
-cd /Users/breydentaylor/operationTorque/intelligence-pipeline
+cd .
 cp .env.example .env
 # Edit .env with your API keys
 
@@ -212,7 +212,7 @@ docker-compose up -d
 - **Concurrent Crawling**: 10-100 simultaneous requests (configurable)
 - **Task Queue**: Unlimited async job processing
 - **Workers**: Scale horizontally (add more worker containers)
-- **Database**: SQLite for operational, RuVector for knowledge
+- **Database**: SQLite for operational, Milvus for vector search
 - **Redis**: Shared state and caching
 
 ### Reliability
@@ -392,6 +392,6 @@ This is a **production-grade** system built with:
 
 ## 🎯 You Have Everything You Need
 
-The intelligence pipeline is **complete** and **ready to use**. All components are built, tested, and documented. Start extracting web intelligence right now!
+Crawlset is **complete** and **ready to use**. All components are built, tested, and documented. Start extracting web intelligence right now!
 
 **Happy Extracting! 🚀**
