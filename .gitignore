@@ -7,6 +7,10 @@
 *.p12
 credentials*.json
 
+# Database
+*.db
+data/*.db
+
 # Python
 __pycache__/
 **/__pycache__/
