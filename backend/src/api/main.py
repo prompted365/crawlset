@@ -11,6 +11,7 @@ from typing import Any, Dict
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from ..config import get_settings
 from ..database import get_db_manager, init_database
@@ -128,7 +129,7 @@ async def health_check() -> Dict[str, Any]:
         db_manager = get_db_manager()
         async with db_manager.get_session() as session:
             # Simple query to verify connection
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
 
         return {
             "status": "healthy",

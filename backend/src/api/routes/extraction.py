@@ -87,9 +87,11 @@ async def extract_url(
             id=job_id,
             url=request.url,
             status="pending",
+            created_at=datetime.utcnow(),
         )
         db.add(job)
         await db.commit()
+        await db.refresh(job)  # Refresh to get server-generated fields
 
         # Submit Celery task
         logger.info(f"Submitting extraction job {job_id} for URL: {request.url}")
@@ -136,10 +138,12 @@ async def batch_extract(
             id=job_id,
             url=f"batch:{len(request.urls)} URLs",
             status="pending",
+            created_at=datetime.utcnow(),
             result={"urls": request.urls, "webset_id": request.webset_id},
         )
         db.add(job)
         await db.commit()
+        await db.refresh(job)  # Refresh to get server-generated fields
 
         # Submit Celery task
         logger.info(f"Submitting batch extraction job {job_id} for {len(request.urls)} URLs")

@@ -5,6 +5,7 @@ Provides endpoints for managing websets, their items, and associated operations
 including search, enrichment, and statistics.
 """
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -68,13 +69,18 @@ async def create_webset(
     try:
         logger.info(f"Creating webset: {webset.name}")
 
+        # Auto-generate ID if not provided
+        webset_id = webset.id or str(uuid4())
+
         # Create webset in database
         db_webset = Webset(
-            id=webset.id,
+            id=webset_id,
             name=webset.name,
             search_query=webset.search_query,
             search_criteria=webset.search_criteria,
             entity_type=webset.entity_type,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
         )
         db.add(db_webset)
         await db.commit()

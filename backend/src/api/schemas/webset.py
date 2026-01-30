@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class WebsetCreate(BaseModel):
     """Schema for creating a new webset."""
-    id: str = Field(..., description="Unique identifier for the webset")
+    id: Optional[str] = Field(None, description="Optional unique identifier (auto-generated if not provided)")
     name: str = Field(..., description="Human-readable name for the webset")
     search_query: Optional[str] = Field(None, description="Search query used to populate the webset")
     search_criteria: Optional[Dict[str, Any]] = Field(None, description="Structured search criteria")
@@ -39,14 +39,14 @@ class WebsetResponse(BaseModel):
 
 class WebsetItemCreate(BaseModel):
     """Schema for creating a new webset item."""
-    id: str = Field(..., description="Unique identifier for the webset item")
+    id: Optional[str] = Field(None, description="Optional unique identifier (auto-generated if not provided)")
     webset_id: str = Field(..., description="ID of the parent webset")
     url: str = Field(..., description="URL of the web content")
     title: Optional[str] = Field(None, description="Title of the web content")
     content_hash: Optional[str] = Field(None, description="Hash of the content for deduplication")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Extracted metadata from the content")
     enrichments: Optional[Dict[str, Any]] = Field(None, description="LLM-generated enrichments")
-    astradb_doc_id: Optional[str] = Field(None, description="Document ID in AstraDB vector database")
+    milvus_doc_id: Optional[str] = Field(None, description="Document ID in Milvus vector database")
 
 
 class WebsetItemResponse(BaseModel):
@@ -60,5 +60,5 @@ class WebsetItemResponse(BaseModel):
     content_hash: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     enrichments: Optional[Dict[str, Any]] = None
-    astradb_doc_id: Optional[str] = None
+    milvus_doc_id: Optional[str] = None
     created_at: datetime

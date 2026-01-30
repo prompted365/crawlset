@@ -5,40 +5,55 @@
 *.key
 *.pem
 *.p12
+credentials*.json
 
 # Python
-backend/.venv/
-backend/venv/
-backend/__pycache__/
-backend/**/__pycache__/
-backend/*.pyc
-backend/*.pyo
-backend/*.pyd
-backend/.Python
-backend/pip-log.txt
-backend/pip-delete-this-directory.txt
-backend/.pytest_cache/
-backend/.mypy_cache/
-backend/.ruff_cache/
-backend/*.egg-info/
-backend/dist/
-backend/build/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+.tox/
+.nox/
 
 # Node.js
-frontend/node_modules/
+node_modules/
 frontend/dist/
 frontend/.vite/
-frontend/npm-debug.log*
-frontend/yarn-debug.log*
-frontend/yarn-error.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
 # Database and data files
 data/*.db
 data/*.sqlite*
+*.db-journal
+*.db-wal
+
+# Milvus runtime data (etcd, minio, rocksdb)
+data/milvus/
+
+# Redis dumps
+data/redis/
+data/dump.rdb
+
+# Ruvector data files
 data/ruvector/*.hnswlib
 data/ruvector/*.index
 data/ruvector/learned_patterns/
-*.db-journal
 
 # Logs
 logs/
@@ -46,16 +61,15 @@ logs/
 backend/celerybeat-schedule
 backend/celerybeat.pid
 
-# Redis dumps
-data/dump.rdb
-
 # Playwright browsers
-backend/.ms-playwright/
 .ms-playwright/
 
 # OS files
 .DS_Store
 Thumbs.db
+Desktop.ini
+.Spotlight-V100
+.Trashes
 
 # IDE
 .vscode/
@@ -63,6 +77,11 @@ Thumbs.db
 *.swp
 *.swo
 *~
+.project
+.classpath
+.settings/
+*.sublime-workspace
+*.sublime-project
 
 # Temporary files
 tmp/
@@ -76,8 +95,15 @@ docker-volumes/
 .coverage
 htmlcov/
 coverage.xml
+*.cover
+.hypothesis/
 
 # Build artifacts
 *.so
 *.dylib
 *.dll
+*.o
+*.a
+
+# Docker override (local dev)
+docker-compose.override.yml
