@@ -35,7 +35,7 @@ def get_monitor_executor() -> MonitorExecutor:
     """Dependency for MonitorExecutor."""
     return MonitorExecutor(
         db_url=settings.database_url,
-        ruvector_data_dir=str(settings.ruvector_data_dir),
+        ruvector_url=settings.ruvector_url,
     )
 
 

@@ -46,7 +46,7 @@ class WebsetItemCreate(BaseModel):
     content_hash: Optional[str] = Field(None, description="Hash of the content for deduplication")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Extracted metadata from the content")
     enrichments: Optional[Dict[str, Any]] = Field(None, description="LLM-generated enrichments")
-    milvus_doc_id: Optional[str] = Field(None, description="Document ID in Milvus vector database")
+    ruvector_doc_id: Optional[str] = Field(None, description="Document ID in RuVector vector database")
 
 
 class WebsetItemResponse(BaseModel):
@@ -60,5 +60,5 @@ class WebsetItemResponse(BaseModel):
     content_hash: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     enrichments: Optional[Dict[str, Any]] = None
-    milvus_doc_id: Optional[str] = None
+    ruvector_doc_id: Optional[str] = None
     created_at: datetime

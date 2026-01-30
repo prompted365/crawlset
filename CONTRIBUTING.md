@@ -219,7 +219,7 @@ backend/src/
 ├── monitors/     # Cron monitoring
 ├── enrichments/  # Plugin system
 ├── queue/        # Celery tasks
-├── milvus/       # Vector database
+├── ruvector/     # Vector database (Rust HTTP client)
 ├── preprocessing/# Content processing
 └── database/     # SQLAlchemy models
 ```

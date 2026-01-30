@@ -50,7 +50,7 @@ class MonitorBehavior(ABC):
         self.manager = manager
         self.search_executor = search_executor or SearchExecutor()
         self.deduplicator = deduplicator or ContentDeduplicator()
-        self.ruvector_client = ruvector_client or RuVectorClient(data_dir="./data/ruvector")
+        self.ruvector_client = ruvector_client or RuVectorClient()
 
     @abstractmethod
     async def execute(

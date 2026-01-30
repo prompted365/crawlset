@@ -1,432 +1,176 @@
 # RuVector Migration Guide
 
-Guide for integrating RuVector into the existing intelligence pipeline.
+Guide for migrating from the old in-process hnswlib/Milvus setup to the new RuVector Rust HTTP service.
+
+## What Changed
+
+| Before | After |
+|--------|-------|
+| 3-service Milvus stack (etcd + MinIO + standalone) | 1 RuVector Rust service |
+| In-process hnswlib Python library | HTTP client (httpx) to Rust/Axum |
+| `pymilvus` + `hnswlib` + `marshmallow` dependencies | `httpx` (already in requirements) |
+| `data_dir` parameter for local index files | `ruvector_url` parameter for HTTP endpoint |
+| `milvus_doc_id` field in database | `ruvector_doc_id` field in database |
 
 ## Prerequisites
 
-1. Install dependencies:
+1. RuVector Rust service running (via Docker Compose):
+```bash
+docker-compose up -d ruvector
+curl http://localhost:6333/health
+```
+
+2. Updated Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Ensure Redis is running (optional, for caching):
+## Step 1: Update Environment
+
+Add to your `.env`:
 ```bash
-redis-server
+RUVECTOR_URL=http://localhost:6333
 ```
 
-## Step 1: Update Database Schema
-
-The `webset_items.astradb_doc_id` field is already in the schema and can be used to store RuVector document IDs.
-
-No migration needed - the field exists:
-```python
-class WebsetItem(Base):
-    ...
-    astradb_doc_id: Optional[str] = Column(String, nullable=True)
+Remove (no longer needed):
+```bash
+# MILVUS_HOST=localhost
+# MILVUS_PORT=19530
 ```
 
-## Step 2: Initialize RuVector Client
-
-Add to your application startup (e.g., `main.py` or as a FastAPI dependency):
-
-```python
-from ruvector import create_client
-from config import get_settings
-
-# Global client instance
-ruvector_client = None
-
-async def startup_event():
-    """Initialize RuVector on startup."""
-    global ruvector_client
-    settings = get_settings()
-
-    ruvector_client = await create_client(
-        data_dir=settings.ruvector_data_dir,
-        embedding_model=settings.embedding_model,
-        redis_url=settings.redis_url,
-    )
-    logger.info("RuVector client initialized")
-
-async def shutdown_event():
-    """Cleanup RuVector on shutdown."""
-    global ruvector_client
-    if ruvector_client:
-        await ruvector_client.close()
-        logger.info("RuVector client closed")
-```
-
-Add to FastAPI app:
-```python
-app.add_event_handler("startup", startup_event)
-app.add_event_handler("shutdown", shutdown_event)
-```
-
-## Step 3: Update Webset Item Creation
-
-Modify your webset item creation to insert into RuVector:
+## Step 2: Update Client Initialization
 
 ### Before:
 ```python
-async def create_webset_item(webset_id: str, url: str, content: str):
-    item = WebsetItem(
-        id=generate_id(),
-        webset_id=webset_id,
-        url=url,
-        # ... other fields
-    )
-    session.add(item)
-    await session.commit()
-    return item
+from ruvector import create_client
+
+client = await create_client(
+    data_dir="./data/ruvector",
+    embedding_model="all-MiniLM-L6-v2",
+    redis_url="redis://localhost:6379/0",
+)
 ```
 
 ### After:
 ```python
-async def create_webset_item(webset_id: str, url: str, content: str, title: str = None):
-    global ruvector_client
+from src.ruvector.client import RuVectorClient
 
-    # Create database item
-    item = WebsetItem(
-        id=generate_id(),
-        webset_id=webset_id,
-        url=url,
-        # ... other fields
-    )
-
-    # Insert into RuVector
-    if content and ruvector_client:
-        try:
-            doc_id = await ruvector_client.insert_document(
-                doc_id=item.id,
-                text=content,
-                metadata={
-                    "webset_id": webset_id,
-                    "url": url,
-                    "title": title,
-                    "created_at": item.created_at.isoformat(),
-                }
-            )
-            item.astradb_doc_id = doc_id
-            logger.info(f"Inserted document {doc_id} into RuVector")
-        except Exception as e:
-            logger.error(f"Failed to insert into RuVector: {e}")
-            # Continue without vector storage
-
-    session.add(item)
-    await session.commit()
-    return item
+client = RuVectorClient(ruvector_url="http://localhost:6333")
+await client.initialize()
 ```
 
-## Step 4: Update Extraction Pipeline
+The client now communicates with the Rust service via HTTP. Embeddings are still generated Python-side and sent as float arrays.
 
-Integrate RuVector into the extraction pipeline to chunk and embed content:
+## Step 3: Update Database References
+
+The `milvus_doc_id` column has been renamed to `ruvector_doc_id`:
 
 ```python
-# In extractors/content.py or similar
-from ruvector import get_client
+# Before
+webset_item.milvus_doc_id = doc_id
 
-async def extract_and_index(url: str, webset_id: str):
-    # Extract content
-    content = await extract_content(url)
-
-    # Get RuVector client
-    client = get_client()  # or use global instance
-
-    # Chunk long documents
-    if len(content["text"]) > 1000:
-        chunks = client._embedder.chunk_text(
-            content["text"],
-            max_tokens=256,
-            overlap=50
-        )
-
-        # Insert chunks
-        for i, chunk in enumerate(chunks):
-            await client.insert_document(
-                doc_id=f"{webset_id}_{url_hash}_{i}",
-                text=chunk,
-                metadata={
-                    "webset_id": webset_id,
-                    "url": url,
-                    "chunk_index": i,
-                    "total_chunks": len(chunks),
-                    "title": content.get("title"),
-                }
-            )
-    else:
-        # Insert whole document
-        await client.insert_document(
-            doc_id=f"{webset_id}_{url_hash}",
-            text=content["text"],
-            metadata={
-                "webset_id": webset_id,
-                "url": url,
-                "title": content.get("title"),
-            }
-        )
+# After
+webset_item.ruvector_doc_id = doc_id
 ```
 
-## Step 5: Add Search Endpoints
-
-Create new API endpoints for RuVector search:
+## Step 4: Update Imports
 
 ```python
-# In api/routes.py or api/search.py
-from fastapi import APIRouter, Query
-from ruvector import create_search_engine
+# Before (removed)
+from pymilvus import connections, Collection
+import hnswlib
 
-router = APIRouter(prefix="/search", tags=["search"])
-
-@router.get("/hybrid")
-async def hybrid_search(
-    query: str,
-    webset_id: str = Query(None),
-    top_k: int = Query(10, ge=1, le=100),
-    alpha: float = Query(0.5, ge=0.0, le=1.0),
-):
-    """
-    Hybrid search across webset documents.
-
-    - query: Search query text
-    - webset_id: Filter by webset ID (optional)
-    - top_k: Number of results
-    - alpha: Semantic weight (0=lexical, 1=semantic)
-    """
-    global ruvector_client
-
-    # Create search engine
-    search_engine = await create_search_engine(ruvector_client, alpha=alpha)
-
-    # Filter by webset if specified
-    filter_metadata = {"webset_id": webset_id} if webset_id else None
-
-    # Search
-    results = await search_engine.search(
-        query=query,
-        top_k=top_k,
-        filter_metadata=filter_metadata,
-    )
-
-    return {
-        "query": query,
-        "alpha": alpha,
-        "results": results,
-    }
-
-@router.get("/similar/{doc_id}")
-async def find_similar(
-    doc_id: str,
-    top_k: int = Query(10, ge=1, le=100),
-):
-    """Find documents similar to a given document."""
-    global ruvector_client
-
-    search_engine = await create_search_engine(ruvector_client)
-    results = await search_engine.get_similar_documents(doc_id, top_k=top_k)
-
-    return {
-        "source_doc_id": doc_id,
-        "similar_documents": results,
-    }
+# After
+from src.ruvector.client import RuVectorClient
 ```
 
-## Step 6: Add Graph Endpoints (Optional)
+## Step 5: Use New Graph, SONA, and GNN Features
 
-Add graph analysis endpoints:
+The Rust service provides additional capabilities:
 
 ```python
-# In api/graph.py
-from ruvector.graph import create_graph
+client = RuVectorClient()
+await client.initialize()
 
-@router.get("/graph/clusters")
-async def find_clusters(
-    eps: float = Query(0.3, ge=0.0, le=1.0),
-    min_samples: int = Query(2, ge=1),
-):
-    """Find document clusters using DBSCAN."""
-    global ruvector_client
+# Graph operations (delegated to Rust)
+await client.build_graph(similarity_threshold=0.7)
+path = await client.find_path("doc1", "doc10")
+clusters = await client.find_clusters()
 
-    graph = await create_graph(ruvector_client)
-    clusters = await graph.find_clusters(eps=eps, min_samples=min_samples)
+# SONA self-learning
+await client.send_sona_trajectory(
+    actions=[{"type": "fetch", "success": True}],
+    reward=0.9,
+)
 
-    return {
-        "num_clusters": len(clusters),
-        "clusters": [
-            {"cluster_id": i, "doc_ids": cluster, "size": len(cluster)}
-            for i, cluster in enumerate(clusters)
-        ]
-    }
-
-@router.get("/graph/path/{source_id}/{target_id}")
-async def find_path(source_id: str, target_id: str, max_depth: int = Query(5)):
-    """Find shortest path between two documents."""
-    global ruvector_client
-
-    graph = await create_graph(ruvector_client)
-    await graph.build_graph_from_documents(similarity_threshold=0.5)
-
-    path = await graph.find_path(source_id, target_id, max_depth=max_depth)
-
-    if path:
-        return {"path": path, "length": len(path) - 1}
-    else:
-        return {"path": None, "message": "No path found"}
-
-@router.get("/graph/export")
-async def export_graph(format: str = Query("json", regex="^(json|cytoscape)$")):
-    """Export knowledge graph."""
-    global ruvector_client
-
-    graph = await create_graph(ruvector_client)
-    await graph.build_graph_from_documents(similarity_threshold=0.5)
-
-    graph_data = await graph.export_graph(format=format)
-    return graph_data
+# GNN training
+await client.train_gnn(
+    interactions=[{"query": "AI", "doc_id": "doc1", "relevance": 0.95}],
+)
 ```
 
-## Step 7: Background Tasks for Indexing
+## Step 6: Docker Compose Changes
 
-Use Celery tasks for async indexing:
+The `docker-compose.yml` has been updated:
+- **Removed**: `milvus-etcd`, `milvus-minio`, `milvus-standalone` (3 services)
+- **Added**: `ruvector` (1 service on port 6333)
+
+All backend and worker services now receive `RUVECTOR_URL=http://ruvector:6333`.
+
+## Step 7: Celery Tasks
+
+New Operation Torque Celery tasks are available:
 
 ```python
-# In queue/tasks.py
-from celery import shared_task
-from ruvector import create_client
+from src.queue.tasks import (
+    send_sona_trajectory_task,
+    train_gnn_task,
+    boris_batch_vectorize_task,
+)
 
-@shared_task
-def index_webset_item(item_id: str):
-    """Background task to index a webset item in RuVector."""
-    import asyncio
+# Send SONA trajectory after extraction
+send_sona_trajectory_task.delay(
+    actions=[...],
+    reward=0.92,
+)
 
-    async def _index():
-        # Get item from database
-        async with get_db_session() as session:
-            item = await session.get(WebsetItem, item_id)
-            if not item:
-                return
+# Train GNN with query interactions
+train_gnn_task.delay(
+    interactions=[...],
+)
 
-            # Create client
-            settings = get_settings()
-            client = await create_client(
-                data_dir=settings.ruvector_data_dir,
-                embedding_model=settings.embedding_model,
-            )
-
-            try:
-                # Index document
-                doc_id = await client.insert_document(
-                    doc_id=item.id,
-                    text=item.content,  # Assuming content field exists
-                    metadata={
-                        "webset_id": item.webset_id,
-                        "url": item.url,
-                        "title": item.title,
-                    }
-                )
-
-                # Update database
-                item.astradb_doc_id = doc_id
-                await session.commit()
-
-            finally:
-                await client.close()
-
-    asyncio.run(_index())
-```
-
-## Step 8: Testing
-
-Run the integration test:
-
-```bash
-cd backend/src/ruvector
-python test_integration.py
-```
-
-Run example usage:
-
-```bash
-python example_usage.py
-```
-
-## Step 9: Monitoring and Maintenance
-
-Add periodic tasks for maintenance:
-
-```python
-@shared_task
-def rebuild_search_index():
-    """Rebuild BM25 search index."""
-    async def _rebuild():
-        client = await create_client(...)
-        search_engine = await create_search_engine(client)
-        await search_engine.index_documents()
-        await client.close()
-
-    asyncio.run(_rebuild())
-
-@shared_task
-def update_graph():
-    """Update knowledge graph."""
-    async def _update():
-        client = await create_client(...)
-        graph = await create_graph(client)
-        await graph.build_graph_from_documents(similarity_threshold=0.6)
-        stats = await graph.get_graph_stats()
-        logger.info(f"Graph updated: {stats}")
-        await client.close()
-
-    asyncio.run(_update())
+# Boris-style batch vectorization
+boris_batch_vectorize_task.delay(
+    webset_id="webset_123",
+    batch_size=100,
+)
 ```
 
 ## Rollback Plan
 
 If issues arise:
 
-1. **Disable RuVector**: Set `ruvector_client = None` to bypass vector operations
-2. **Remove from pipeline**: Comment out RuVector calls in extraction/search
-3. **Clear data**: Delete `./data/ruvector` directory to start fresh
-4. **Database cleanup**: Set `astradb_doc_id = NULL` if needed
+1. **Disable RuVector**: Set `RUVECTOR_URL` to empty; client falls back gracefully
+2. **Revert Docker**: Restore old `docker-compose.yml` with Milvus services
+3. **Revert client**: The `RuVectorClient` constructor still accepts `data_dir` and `**kwargs` for backward compatibility
+4. **Database**: The `ruvector_doc_id` column is backward compatible
 
-## Performance Tuning
+## Verification
 
-1. **Embedding batch size**: Adjust based on memory
-   ```python
-   EMBEDDING_BATCH_SIZE=64  # Increase for more RAM
-   ```
+```bash
+# 1. RuVector service healthy
+curl http://localhost:6333/health
 
-2. **HNSW parameters**: Tune for your use case
-   ```python
-   index_params = {
-       "ef_construction": 200,  # Build quality
-       "M": 16,                 # Connectivity
-       "ef": 50,                # Search quality
-   }
-   ```
+# 2. Backend reports RuVector connected
+curl http://localhost:8000/health
 
-3. **Redis caching**: Essential for production
-   ```python
-   REDIS_URL=redis://localhost:6379/0
-   ```
+# 3. Create a webset and extract a URL
+curl -X POST http://localhost:8000/api/websets \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Test", "search_query": "test"}'
 
-4. **Alpha tuning**: Adjust per query type
-   - Keyword queries: `alpha=0.3`
-   - Semantic queries: `alpha=0.7`
-   - Balanced: `alpha=0.5`
-
-## Next Steps
-
-1. Run integration tests
-2. Start with a small dataset (100-1000 documents)
-3. Monitor performance metrics
-4. Tune parameters based on results
-5. Scale to full dataset
-6. Enable graph features if needed
-
-## Support
-
-For issues or questions:
-1. Check README.md for API reference
-2. Review example_usage.py for patterns
-3. Run test_integration.py to verify setup
-4. Check logs for error messages
+# 4. Search returns results
+curl -X POST http://localhost:8000/api/search/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "test", "top_k": 5}'
+```

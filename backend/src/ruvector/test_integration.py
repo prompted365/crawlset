@@ -1,12 +1,12 @@
 """
 Quick integration test for RuVector components.
 
-This script verifies that all RuVector modules are properly integrated
-and can be imported without errors.
+Tests the RuVector Rust service via the async HTTP client, including
+document operations, search, graph, SONA, and GNN endpoints.
 """
 import asyncio
+import os
 import sys
-from pathlib import Path
 
 
 async def test_imports():
@@ -24,84 +24,98 @@ async def test_imports():
             GraphOperations,
             create_graph,
         )
-        print("✓ All imports successful")
+        print("  All imports successful")
         return True
     except ImportError as e:
-        print(f"✗ Import error: {e}")
+        print(f"  Import error: {e}")
         return False
 
 
 async def test_basic_functionality():
-    """Test basic functionality of RuVector components."""
+    """Test basic functionality against the RuVector Rust service."""
     print("\nTesting basic functionality...")
 
     try:
         from ruvector import create_client, create_search_engine, create_graph
 
-        # Create client with temporary directory
-        import tempfile
-        with tempfile.TemporaryDirectory() as tmpdir:
-            print(f"  Using temp directory: {tmpdir}")
+        ruvector_url = os.environ.get("RUVECTOR_URL", "http://localhost:6333")
+        print(f"  Connecting to RuVector at: {ruvector_url}")
 
-            # Initialize client
-            print("  Creating client...")
-            client = await create_client(
-                data_dir=tmpdir,
-                embedding_model="all-MiniLM-L6-v2",
-            )
-            print("  ✓ Client created")
+        # Initialize client
+        print("  Creating client...")
+        client = await create_client(ruvector_url=ruvector_url)
+        print("  Client created")
 
-            # Insert test documents
-            print("  Inserting test documents...")
+        # Health check
+        print("  Checking health...")
+        health = await client.health_check()
+        print(f"  Health: {health['status']}")
+
+        # Insert test documents with dummy embeddings
+        print("  Inserting test documents...")
+        import numpy as np
+
+        for doc_id, text in [
+            ("doc1", "This is a test document about artificial intelligence."),
+            ("doc2", "Machine learning is a subset of artificial intelligence."),
+            ("doc3", "Python is a popular programming language."),
+        ]:
+            embedding = np.random.rand(384).tolist()
             await client.insert_document(
-                doc_id="doc1",
-                text="This is a test document about artificial intelligence.",
+                doc_id=doc_id,
+                text=text,
                 metadata={"category": "test"},
+                embedding=embedding,
             )
-            await client.insert_document(
-                doc_id="doc2",
-                text="Machine learning is a subset of artificial intelligence.",
-                metadata={"category": "test"},
-            )
-            await client.insert_document(
-                doc_id="doc3",
-                text="Python is a popular programming language.",
-                metadata={"category": "programming"},
-            )
-            print("  ✓ Documents inserted")
+        print("  Documents inserted")
 
-            # Test search
-            print("  Testing search...")
-            results = await client.hybrid_search("artificial intelligence", top_k=2)
-            print(f"  ✓ Search returned {len(results)} results")
+        # Test search
+        print("  Testing search...")
+        query_embedding = np.random.rand(384).tolist()
+        results = await client.hybrid_search(embedding=query_embedding, top_k=2)
+        print(f"  Search returned {len(results)} results")
 
-            # Test hybrid search engine
-            print("  Creating hybrid search engine...")
-            search_engine = await create_search_engine(client, alpha=0.5)
-            results = await search_engine.search("machine learning", top_k=2)
-            print(f"  ✓ Hybrid search returned {len(results)} results")
+        # Test graph operations
+        print("  Building graph...")
+        graph_result = await client.build_graph(similarity_threshold=0.0)
+        print(f"  Graph: {graph_result.get('nodes', 0)} nodes, {graph_result.get('edges', 0)} edges")
 
-            # Test graph operations
-            print("  Creating graph...")
-            graph = await create_graph(client)
-            await graph.build_graph_from_documents(similarity_threshold=0.5)
-            stats = await graph.get_graph_stats()
-            print(f"  ✓ Graph built: {stats['num_nodes']} nodes, {stats['num_edges']} edges")
+        # Test graph stats
+        graph_stats = await client.get_graph_stats()
+        print(f"  Graph stats: {graph_stats}")
 
-            # Get stats
-            print("  Getting client stats...")
-            stats = await client.get_stats()
-            print(f"  ✓ Stats: {stats['total_documents']} documents")
+        # Test SONA trajectory
+        print("  Testing SONA trajectory...")
+        sona_result = await client.send_sona_trajectory({
+            "pattern": "test_extraction",
+            "success": True,
+            "confidence": 0.95,
+        })
+        print(f"  SONA: {sona_result.get('status', 'unknown')}")
 
-            # Cleanup
-            await client.close()
-            print("  ✓ Client closed")
+        # Test GNN training
+        print("  Testing GNN training...")
+        gnn_result = await client.train_gnn([
+            {"query": "AI research", "clicked": "doc1", "position": 1},
+        ])
+        print(f"  GNN: {gnn_result.get('status', 'unknown')}")
 
-        print("\n✓ All tests passed!")
+        # Get stats
+        print("  Getting client stats...")
+        stats = await client.get_stats()
+        print(f"  Stats: {stats.get('total_documents', 0)} documents")
+
+        # Cleanup
+        for doc_id in ["doc1", "doc2", "doc3"]:
+            await client.delete_document(doc_id)
+        await client.close()
+        print("  Client closed")
+
+        print("\n  All tests passed!")
         return True
 
     except Exception as e:
-        print(f"\n✗ Test failed: {e}")
+        print(f"\n  Test failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -110,7 +124,7 @@ async def test_basic_functionality():
 async def main():
     """Run all tests."""
     print("=" * 60)
-    print("RuVector Integration Test")
+    print("RuVector Integration Test (Rust HTTP Service)")
     print("=" * 60)
 
     # Test imports

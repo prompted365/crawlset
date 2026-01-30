@@ -1,14 +1,13 @@
 """
 Example usage of RuVector integration with the intelligence pipeline.
 
-This demonstrates how to integrate RuVector with websets, extractors,
-and search functionality.
+This demonstrates how to integrate with the RuVector Rust service via HTTP.
+Requires the RuVector service running at RUVECTOR_URL (default: http://localhost:6333).
 """
 import asyncio
-from pathlib import Path
+import os
 
-from ruvector import create_client, create_search_engine
-from ruvector.graph import create_graph
+from .client import RuVectorClient
 
 
 async def example_basic_operations():
@@ -17,12 +16,11 @@ async def example_basic_operations():
     print("Example 1: Basic Document Operations")
     print("=" * 60)
 
-    # Create client
-    client = await create_client(
-        data_dir="./data/ruvector",
-        embedding_model="all-MiniLM-L6-v2",
-        redis_url="redis://localhost:6379/0",
+    # Create client (connects to RuVector Rust service via HTTP)
+    client = RuVectorClient(
+        ruvector_url=os.environ.get("RUVECTOR_URL", "http://localhost:6333"),
     )
+    await client.initialize()
 
     # Insert documents
     print("\nInserting documents...")
@@ -44,7 +42,7 @@ async def example_basic_operations():
         metadata={"source": "tutorial", "category": "programming"},
     )
 
-    print("✓ Documents inserted")
+    print("Documents inserted")
 
     # Search
     print("\nSearching for 'machine learning'...")
@@ -68,7 +66,8 @@ async def example_bulk_insert_and_search():
     print("Example 2: Bulk Insert and Hybrid Search")
     print("=" * 60)
 
-    client = await create_client(data_dir="./data/ruvector")
+    client = RuVectorClient()
+    await client.initialize()
 
     # Bulk insert
     documents = [
@@ -82,20 +81,13 @@ async def example_bulk_insert_and_search():
 
     print(f"\nBulk inserting {len(documents)} documents...")
     doc_ids = await client.bulk_insert(documents, batch_size=5)
-    print(f"✓ Inserted {len(doc_ids)} documents")
+    print(f"Inserted {len(doc_ids)} documents")
 
-    # Create search engine
-    print("\nCreating hybrid search engine...")
-    search_engine = await create_search_engine(client, alpha=0.6)
-
-    # Search with different alpha values
-    for alpha in [0.0, 0.5, 1.0]:
-        search_engine.set_alpha(alpha)
-        results = await search_engine.search("technology", top_k=3)
-
-        print(f"\nSearch results (alpha={alpha}):")
-        for result in results:
-            print(f"  - {result['id']}: {result['score']:.3f}")
+    # Search
+    results = await client.hybrid_search("technology", top_k=3)
+    print("\nSearch results:")
+    for result in results:
+        print(f"  - {result['id']}: {result['score']:.3f}")
 
     await client.close()
 
@@ -106,7 +98,8 @@ async def example_graph_operations():
     print("Example 3: Graph Operations")
     print("=" * 60)
 
-    client = await create_client(data_dir="./data/ruvector")
+    client = RuVectorClient()
+    await client.initialize()
 
     # Insert some documents
     documents = [
@@ -119,17 +112,13 @@ async def example_graph_operations():
 
     await client.bulk_insert(documents)
 
-    # Create graph
+    # Build graph via RuVector Rust service
     print("\nBuilding knowledge graph...")
-    graph = await create_graph(client)
-    await graph.build_graph_from_documents(similarity_threshold=0.5)
-
-    stats = await graph.get_graph_stats()
-    print(f"Graph stats: {stats}")
+    await client.build_graph(similarity_threshold=0.5)
 
     # Find path
     print("\nFinding path between ai1 and ai3...")
-    path = await graph.find_path("ai1", "ai3", max_depth=3)
+    path = await client.find_path("ai1", "ai3", max_depth=3)
     if path:
         print(f"Path found: {' -> '.join(path)}")
     else:
@@ -137,19 +126,15 @@ async def example_graph_operations():
 
     # Get neighbors
     print("\nGetting neighbors of ai1...")
-    neighbors = await graph.get_neighbors("ai1", max_depth=1)
+    neighbors = await client.get_neighbors("ai1")
     for neighbor in neighbors:
-        print(f"  - {neighbor['id']}: {neighbor['edge_properties']}")
+        print(f"  - {neighbor}")
 
     # Find clusters
     print("\nFinding document clusters...")
-    clusters = await graph.find_clusters(eps=0.4, min_samples=2)
+    clusters = await client.find_clusters()
     for i, cluster in enumerate(clusters):
         print(f"  Cluster {i}: {cluster}")
-
-    # Export graph
-    graph_data = await graph.export_graph(format="json")
-    print(f"\nGraph exported: {len(graph_data['nodes'])} nodes, {len(graph_data['edges'])} edges")
 
     await client.close()
 
@@ -160,7 +145,8 @@ async def example_webset_integration():
     print("Example 4: Webset Integration")
     print("=" * 60)
 
-    client = await create_client(data_dir="./data/ruvector")
+    client = RuVectorClient()
+    await client.initialize()
 
     # Simulate webset items
     webset_id = "webset_123"
@@ -199,61 +185,51 @@ async def example_webset_integration():
 
     # Search within webset
     print("\nSearching within webset...")
-    search_engine = await create_search_engine(client, alpha=0.7)
-    results = await search_engine.search(
+    results = await client.hybrid_search(
         query="medical AI applications",
         top_k=5,
-        filter_metadata={"webset_id": webset_id},
     )
 
-    print(f"\nFound {len(results)} results in webset {webset_id}:")
+    print(f"\nFound {len(results)} results:")
     for result in results:
-        print(f"\n  Title: {result['metadata']['title']}")
-        print(f"  URL: {result['metadata']['url']}")
+        print(f"\n  Title: {result.get('metadata', {}).get('title', 'N/A')}")
         print(f"  Score: {result['score']:.3f}")
-        print(f"  Text: {result['text'][:100]}...")
+        print(f"  Text: {result.get('text', '')[:100]}...")
 
     await client.close()
 
 
-async def example_chunking_and_embedding():
-    """Example: Text chunking and embedding."""
+async def example_sona_and_gnn():
+    """Example: SONA self-learning and GNN training."""
     print("\n" + "=" * 60)
-    print("Example 5: Text Chunking and Embedding")
+    print("Example 5: SONA + GNN Self-Learning")
     print("=" * 60)
 
-    client = await create_client(data_dir="./data/ruvector")
+    client = RuVectorClient()
+    await client.initialize()
 
-    # Long document
-    long_text = " ".join([
-        f"This is sentence {i} in a very long document about various topics."
-        for i in range(100)
-    ])
+    # Send SONA trajectory after successful extraction
+    print("\nSending SONA trajectory...")
+    trajectory_result = await client.send_sona_trajectory(
+        actions=[
+            {"type": "fetch", "url": "https://example.com", "success": True},
+            {"type": "parse", "parser": "trafilatura", "success": True},
+            {"type": "enrich", "plugin": "content_enricher", "success": True},
+        ],
+        reward=0.92,
+    )
+    print(f"SONA response: {trajectory_result}")
 
-    print(f"\nOriginal text length: {len(long_text)} chars")
-    print(f"Token count: {client._embedder.count_tokens(long_text)}")
-
-    # Chunk text
-    chunks = client._embedder.chunk_text(long_text, max_tokens=50, overlap=10)
-    print(f"\nSplit into {len(chunks)} chunks")
-
-    # Insert chunks
-    print("\nInserting chunks...")
-    for i, chunk in enumerate(chunks):
-        await client.insert_document(
-            doc_id=f"doc_chunk_{i}",
-            text=chunk,
-            metadata={"chunk_index": i, "total_chunks": len(chunks)},
-        )
-
-    print(f"✓ Inserted {len(chunks)} chunks")
-
-    # Search across chunks
-    results = await client.hybrid_search("sentence 50", top_k=3)
-    print("\nSearch results:")
-    for result in results:
-        chunk_idx = result['metadata']['chunk_index']
-        print(f"  Chunk {chunk_idx}: score={result['score']:.3f}")
+    # Train GNN with query-result interactions
+    print("\nTraining GNN with interactions...")
+    gnn_result = await client.train_gnn(
+        interactions=[
+            {"query": "AI healthcare", "doc_id": "doc1", "relevance": 0.95},
+            {"query": "machine learning", "doc_id": "doc2", "relevance": 0.87},
+            {"query": "deep learning", "doc_id": "doc3", "relevance": 0.72},
+        ],
+    )
+    print(f"GNN response: {gnn_result}")
 
     await client.close()
 
@@ -261,6 +237,7 @@ async def example_chunking_and_embedding():
 async def main():
     """Run all examples."""
     print("\nRuVector Integration Examples")
+    print("(Requires RuVector Rust service running)")
     print("==============================\n")
 
     try:
@@ -268,14 +245,14 @@ async def main():
         await example_bulk_insert_and_search()
         await example_graph_operations()
         await example_webset_integration()
-        await example_chunking_and_embedding()
+        await example_sona_and_gnn()
 
         print("\n" + "=" * 60)
         print("All examples completed successfully!")
         print("=" * 60)
 
     except Exception as e:
-        print(f"\n✗ Error running examples: {e}")
+        print(f"\nError running examples: {e}")
         import traceback
         traceback.print_exc()
 

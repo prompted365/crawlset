@@ -16,69 +16,26 @@ services:
     networks:
       - intelligence-network
 
-  # Milvus - Vector database
-  milvus-etcd:
-    image: quay.io/coreos/etcd:v3.5.5
-    container_name: milvus-etcd
-    environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
-    volumes:
-      - ./data/milvus/etcd:/etcd
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    networks:
-      - intelligence-network
-
-  milvus-minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    container_name: milvus-minio
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+  # RuVector - Rust-based vector database with HNSW, GNN, SONA, and Graph
+  ruvector:
+    build:
+      context: ./ruvector-service
+      dockerfile: Dockerfile
+    container_name: intelligence-ruvector
     ports:
-      - "9001:9001"
-      - "9000:9000"
-    volumes:
-      - ./data/milvus/minio:/minio_data
-    command: minio server /minio_data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    networks:
-      - intelligence-network
-
-  milvus-standalone:
-    image: milvusdb/milvus:v2.3.3
-    container_name: milvus-standalone
-    command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
+      - "6333:6333"
     environment:
-      ETCD_ENDPOINTS: milvus-etcd:2379
-      MINIO_ADDRESS: milvus-minio:9000
+      - RUVECTOR_HOST=0.0.0.0
+      - RUVECTOR_PORT=6333
+      - RUVECTOR_DATA_DIR=/data/ruvector
     volumes:
-      - ./data/milvus/milvus:/var/lib/milvus
+      - ./data/ruvector:/data/ruvector
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 30s
-      start_period: 90s
-      timeout: 20s
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 3s
       retries: 3
-    ports:
-      - "19530:19530"
-      - "9091:9091"
-    depends_on:
-      - milvus-etcd
-      - milvus-minio
+    restart: unless-stopped
     networks:
       - intelligence-network
 
@@ -94,8 +51,7 @@ services:
       - PORT=8000
       - REDIS_URL=redis://redis:6379/0
       - SQLITE_DB=/app/data/websets.db
-      - MILVUS_HOST=milvus-standalone
-      - MILVUS_PORT=19530
+      - RUVECTOR_URL=http://ruvector:6333
     env_file:
       - .env
     volumes:
@@ -103,7 +59,7 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     depends_on:
-      milvus-standalone:
+      ruvector:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -127,7 +83,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - SQLITE_DB=/app/data/websets.db
-      - RUVECTOR_DATA_DIR=/app/data/ruvector
+      - RUVECTOR_URL=http://ruvector:6333
     env_file:
       - .env
     volumes:
@@ -153,7 +109,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - SQLITE_DB=/app/data/websets.db
-      - RUVECTOR_DATA_DIR=/app/data/ruvector
+      - RUVECTOR_URL=http://ruvector:6333
     env_file:
       - .env
     volumes:
@@ -179,7 +135,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - SQLITE_DB=/app/data/websets.db
-      - RUVECTOR_DATA_DIR=/app/data/ruvector
+      - RUVECTOR_URL=http://ruvector:6333
     env_file:
       - .env
     volumes:
@@ -205,7 +161,7 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - SQLITE_DB=/app/data/websets.db
-      - RUVECTOR_DATA_DIR=/app/data/ruvector
+      - RUVECTOR_URL=http://ruvector:6333
     env_file:
       - .env
     volumes:

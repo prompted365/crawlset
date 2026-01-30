@@ -60,9 +60,13 @@ class Settings(BaseSettings):
     cors_allow_headers: List[str] = Field(default=["*"], description="Allowed CORS headers")
 
     # RuVector Configuration
+    ruvector_url: str = Field(
+        default="http://localhost:6333",
+        description="RuVector Rust service URL",
+    )
     ruvector_data_dir: Path = Field(
         default=Path("./data/ruvector"),
-        description="RuVector data directory",
+        description="RuVector data directory (used by Rust service)",
     )
     ruvector_enable_gnn: bool = Field(
         default=True,

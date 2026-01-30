@@ -48,7 +48,7 @@ class SearchExecutor:
         ruvector_client: Optional[RuVectorClient] = None,
         deduplicator: Optional[ContentDeduplicator] = None,
     ):
-        self.ruvector_client = ruvector_client or RuVectorClient(data_dir="./data/ruvector")
+        self.ruvector_client = ruvector_client or RuVectorClient()
         self.deduplicator = deduplicator or ContentDeduplicator()
 
     async def execute_ruvector_search(

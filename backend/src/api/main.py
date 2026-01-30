@@ -51,14 +51,28 @@ async def lifespan(app: FastAPI):
     await db_manager.init_db()
     logger.info("Database initialized successfully")
 
-    # TODO: Start scheduler for monitors
-    # from ..monitors.scheduler import start_scheduler
-    # await start_scheduler()
+    # Initialize RuVector client
+    from ..ruvector.client import RuVectorClient
+
+    ruvector_client = RuVectorClient(ruvector_url=settings.ruvector_url)
+    try:
+        await ruvector_client.initialize()
+        app.state.ruvector_client = ruvector_client
+        logger.info(f"RuVector client connected to {settings.ruvector_url}")
+    except Exception as e:
+        logger.warning(f"RuVector client init failed (service may not be running): {e}")
+        app.state.ruvector_client = ruvector_client  # Store anyway for lazy init
 
     yield
 
     # Shutdown
     logger.info("Shutting down intelligence pipeline backend...")
+
+    # Close RuVector client
+    if hasattr(app.state, "ruvector_client") and app.state.ruvector_client:
+        await app.state.ruvector_client.close()
+        logger.info("RuVector client closed")
+
     await db_manager.close()
     logger.info("Database connections closed")
 
@@ -124,26 +138,40 @@ async def health_check() -> Dict[str, Any]:
 
     Returns the application status and version information.
     """
+    result = {
+        "status": "healthy",
+        "version": "1.0.0",
+        "database": "unknown",
+        "ruvector": "unknown",
+    }
+
+    # Check database connectivity
     try:
-        # Check database connectivity
         db_manager = get_db_manager()
         async with db_manager.get_session() as session:
-            # Simple query to verify connection
             await session.execute(text("SELECT 1"))
-
-        return {
-            "status": "healthy",
-            "version": "1.0.0",
-            "database": "connected",
-        }
+        result["database"] = "connected"
     except Exception as e:
-        logger.error(f"Health check failed: {e}", exc_info=True)
-        return {
-            "status": "unhealthy",
-            "version": "1.0.0",
-            "database": "disconnected",
-            "error": str(e),
-        }
+        logger.error(f"Database health check failed: {e}", exc_info=True)
+        result["database"] = "disconnected"
+        result["status"] = "degraded"
+
+    # Check RuVector connectivity
+    try:
+        from fastapi import Request as _Req
+
+        ruvector_client = getattr(app.state, "ruvector_client", None)
+        if ruvector_client:
+            health = await ruvector_client.health_check()
+            result["ruvector"] = health.get("status", "connected")
+        else:
+            result["ruvector"] = "not_initialized"
+    except Exception as e:
+        logger.error(f"RuVector health check failed: {e}", exc_info=True)
+        result["ruvector"] = "disconnected"
+        result["status"] = "degraded"
+
+    return result
 
 
 # API routers

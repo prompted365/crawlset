@@ -23,7 +23,7 @@ settings = get_settings()
 
 def get_search_executor() -> SearchExecutor:
     """Dependency for SearchExecutor."""
-    ruvector_client = RuVectorClient(data_dir=str(settings.ruvector_data_dir))
+    ruvector_client = RuVectorClient(ruvector_url=settings.ruvector_url)
     return SearchExecutor(ruvector_client=ruvector_client)
 
 

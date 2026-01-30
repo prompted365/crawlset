@@ -55,7 +55,7 @@ class WebsetItem(Base):
     content_hash = Column(String, nullable=True)
     item_metadata = Column(Text, nullable=True)  # JSON
     enrichments = Column(Text, nullable=True)  # JSON
-    milvus_doc_id = Column(String, nullable=True)
+    ruvector_doc_id = Column(String, nullable=True)
     last_crawled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -71,7 +71,7 @@ class WebsetItem(Base):
             "content_hash": self.content_hash,
             "metadata": json.loads(self.item_metadata) if self.item_metadata else None,
             "enrichments": json.loads(self.enrichments) if self.enrichments else None,
-            "milvus_doc_id": self.milvus_doc_id,
+            "ruvector_doc_id": self.ruvector_doc_id,
             "last_crawled_at": self.last_crawled_at.isoformat() if self.last_crawled_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

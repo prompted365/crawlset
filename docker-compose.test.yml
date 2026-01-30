@@ -18,6 +18,26 @@ services:
     networks:
       - test-network
 
+  # RuVector - Vector database for testing
+  ruvector-test:
+    build:
+      context: ./ruvector-service
+      dockerfile: Dockerfile
+    container_name: intelligence-ruvector-test
+    ports:
+      - "6334:6333"
+    environment:
+      - RUVECTOR_HOST=0.0.0.0
+      - RUVECTOR_PORT=6333
+      - RUVECTOR_DATA_DIR=/data/test_ruvector
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    networks:
+      - test-network
+
   # Backend API - Test mode
   backend-test:
     build:
@@ -30,7 +50,7 @@ services:
       - PORT=8000
       - REDIS_URL=redis://redis-test:6379/0
       - SQLITE_DB=/app/data/test_websets.db
-      - RUVECTOR_DATA_DIR=/app/data/test_ruvector
+      - RUVECTOR_URL=http://ruvector-test:6333
       - ENVIRONMENT=test
       - DEBUG=true
       - LOG_LEVEL=DEBUG
@@ -47,6 +67,8 @@ services:
       - ./logs/test:/app/logs
     depends_on:
       redis-test:
+        condition: service_healthy
+      ruvector-test:
         condition: service_healthy
     command: >
       sh -c "
@@ -66,7 +88,7 @@ services:
     environment:
       - REDIS_URL=redis://redis-test:6379/0
       - SQLITE_DB=/app/data/test_websets.db
-      - RUVECTOR_DATA_DIR=/app/data/test_ruvector
+      - RUVECTOR_URL=http://ruvector-test:6333
       - ENVIRONMENT=test
       - DEBUG=true
     env_file:
@@ -93,7 +115,7 @@ services:
     environment:
       - REDIS_URL=redis://redis-test:6379/0
       - SQLITE_DB=/app/data/test_websets.db
-      - RUVECTOR_DATA_DIR=/app/data/test_ruvector
+      - RUVECTOR_URL=http://ruvector-test:6333
       - ENVIRONMENT=test
       - DEBUG=true
     env_file:

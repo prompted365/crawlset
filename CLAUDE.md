@@ -8,7 +8,7 @@ Crawlset is a self-hosted web intelligence pipeline that combines:
 - Advanced web crawling (like Firecrawl)
 - Webset collections (like Exa)
 - Distributed processing (like Spark)
-- Vector search (Milvus)
+- Vector search ([RuVector](https://github.com/ruvnet/ruvector))
 
 No vendor lock-in, no API costs, full control.
 
@@ -26,7 +26,7 @@ crawlset/
 │   │   ├── monitors/  # Cron-based monitoring
 │   │   ├── enrichments/# Plugin system for data enrichment
 │   │   ├── queue/     # Celery task queue
-│   │   ├── milvus/    # Vector database client
+│   │   ├── ruvector/  # RuVector async HTTP client
 │   │   ├── preprocessing/# Content chunking, cleaning, reranking
 │   │   └── database/  # SQLAlchemy models
 │   └── requirements.txt
@@ -47,7 +47,7 @@ crawlset/
 Collections of web content organized by topic/entity. Like playlists for web pages.
 
 **Database**: `websets` table (SQLite)
-**Vector Storage**: Milvus collections
+**Vector Storage**: RuVector collections
 **Code**: `backend/src/websets/manager.py`
 
 ### 2. Extraction Jobs
@@ -71,10 +71,10 @@ Plugins that add metadata/insights to extracted content using LLMs.
 **Code**: `backend/src/enrichments/plugins/`
 
 ### 5. Hybrid Search
-Combines vector similarity (Milvus) + keyword matching (BM25) for better results.
+Combines vector similarity (RuVector HNSW + GNN) + keyword matching (BM25) for better results.
 
-**Vector DB**: Milvus
-**Code**: `backend/src/milvus/search.py`
+**Vector DB**: [RuVector](https://github.com/ruvnet/ruvector) (Rust/Axum on port 6333)
+**Code**: `backend/src/ruvector/search.py`
 
 ## Architecture Patterns
 
@@ -262,19 +262,25 @@ docker-compose -f docker-compose.test.yml up
 
 ## Integration Points
 
-### Milvus Integration
-Location: `backend/src/milvus/`
-- **Client**: `client.py` - Connection and operations
-- **Embedder**: `embedder.py` - sentence-transformers with caching
-- **Search**: `search.py` - Hybrid search (vector + BM25)
+### RuVector Integration
+Location: `backend/src/ruvector/`
+- **Client**: `client.py` - Async HTTP client (httpx) to Rust/Axum server on port 6333
+- **Embedder**: `embedder.py` - sentence-transformers with Redis caching
+- **Search**: `search.py` - Hybrid search (HNSW vector + BM25 + GNN-enhanced)
+- **Graph**: `graph.py` - Cypher graph queries for entity relationships
+
+RuVector is a Rust-based self-learning vector database designed by [Ruv](https://github.com/ruvnet/ruvector). It features HNSW indexing, GNN self-learning, SONA optimization, and Cypher graph queries. It runs as a single service (replacing the 3-service Milvus stack of etcd + MinIO + standalone) with 61us p50 latency and 200MB per 1M vectors.
 
 Key operations:
 ```python
-from src.milvus import create_client
+from src.ruvector.client import RuVectorClient
 
-client = await create_client()
-await client.insert(collection="websets", id="doc1", text="...", metadata={...})
-results = await client.search(collection="websets", query="...", top_k=10)
+client = RuVectorClient(ruvector_url="http://localhost:6333")
+await client.initialize()
+await client.insert_document(doc_id="doc1", text="...", metadata={...})
+results = await client.hybrid_search("query text", top_k=10)
+graph_results = await client.graph_query("MATCH (a)-[:RELATED_TO]->(b) RETURN a, b")
+await client.close()
 ```
 
 ### Celery Tasks
@@ -287,7 +293,7 @@ Three priority levels:
 
 ### Database
 **Operational**: SQLite (or PostgreSQL in production)
-**Vector**: Milvus collections
+**Vector**: RuVector collections (Rust/Axum on port 6333)
 
 Models in `backend/src/database/models.py`
 
@@ -331,7 +337,7 @@ docker-compose up -d
 All config in `.env`:
 - **Required**: LLM API key (Requesty/OpenAI/Anthropic)
 - **Required**: Redis URL
-- **Required**: Milvus host
+- **Required**: RuVector host (default: localhost:6333)
 - **Optional**: Proxy URLs, rate limits, etc.
 
 See `.env.example` for all options.
@@ -359,8 +365,9 @@ sqlite3 data/websets.db
 .tables
 SELECT * FROM websets;
 
-# Milvus
-docker-compose exec milvus-standalone milvus_cli
+# RuVector
+curl http://localhost:6333/health
+curl http://localhost:6333/collections
 ```
 
 ## Performance Considerations
@@ -433,5 +440,5 @@ docker-compose up -d --scale celery-worker-realtime=3
 This guide covers the essentials. For deeper dives, see:
 - [System Summary](SYSTEM_SUMMARY.md) - Complete architecture
 - [API Routes](backend/API_ROUTES.md) - All endpoints
-- [Milvus Guide](docs/MILVUS_GUIDE.md) - Vector database integration
+- [RuVector Integration](docs/RUVECTOR_INTEGRATION.md) - Vector database integration
 - [Contributing](CONTRIBUTING.md) - Contribution guidelines

@@ -37,10 +37,7 @@ apscheduler==3.10.4
 kombu==5.4.2
 psutil==6.1.1
 
-# Vector & Search
-pymilvus==2.4.0
-marshmallow<4.0.0  # Pin to 3.x for pymilvus compatibility
-hnswlib==0.8.0
+# Vector & Search (RuVector via HTTP - no pymilvus/hnswlib needed)
 numpy==2.2.1
 sentence-transformers==3.3.1
 scikit-learn==1.5.2

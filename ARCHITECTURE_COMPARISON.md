@@ -43,12 +43,15 @@ Build a production-grade web extraction and monitoring system using homegrown in
 * Cron job history and execution logs
 * User preferences and API keys
 * Fast queries with proper indexing
-**RuVector for Knowledge Base** (`src/ruvector/`)
-* Self-learning vector database with GNN layers
+**[RuVector](https://github.com/ruvnet/ruvector) for Knowledge Base** (`src/ruvector/`)
+* Rust-based self-learning vector database designed by [Ruv](https://github.com/ruvnet)
+* HNSW indexing with 61us p50 latency, 200MB per 1M vectors
+* GNN self-learning layers that improve recall over time
+* SONA (Self-Organizing Neural Architecture) for adaptive index tuning
+* Cypher graph queries for entity relationship traversal
 * Automatic embedding generation (RuvLLM integration)
-* Graph queries with Cypher-like syntax
-* Hybrid search improving over time
-* HNSW index with Q-learning reinforcement
+* Hybrid search (BM25 + HNSW vector + GNN-enhanced retrieval)
+* Single-service deployment via Rust/Axum on port 6333 (replaces etcd + MinIO + Milvus standalone)
 * Horizontal scaling with Raft consensus
 * Works offline/edge with WASM support
 **Preprocessing Pipeline** (`src/preprocessing/`)
@@ -83,8 +86,8 @@ Build a production-grade web extraction and monitoring system using homegrown in
 2. **Crawl**: Fetch content with browser automation
 3. **Parse**: Extract structured data + citations
 4. **Chunk**: Split into semantic chunks
-5. **Embed**: Generate vectors via AstraDB $vectorize
-6. **Store**: Save to AstraDB with metadata
+5. **Embed**: Generate vectors via sentence-transformers
+6. **Store**: Save to RuVector with metadata
 7. **Index**: Create hybrid search indexes
 ### Webset Flow
 1. **Define**: Create webset with search criteria
@@ -98,7 +101,7 @@ Build a production-grade web extraction and monitoring system using homegrown in
 **Frontend**: React + TypeScript + Vite + TailwindCSS + shadcn/ui
 **Crawling**: Playwright, httpx, beautifulsoup4, trafilatura
 **Processing**: Celery + Redis
-**Storage**: SQLite (operational), RuVector (knowledge + self-learning)
+**Storage**: SQLite (operational), [RuVector](https://github.com/ruvnet/ruvector) (knowledge + self-learning vectors)
 **LLM**: Requesty.ai router (OpenAI, Claude, etc)
 **Scheduling**: APScheduler
 **Monitoring**: Prometheus + Grafana
@@ -238,9 +241,9 @@ CREATE TABLE extraction_jobs (
     completed_at TIMESTAMP
 );
 ```
-**AstraDB (Knowledge Base)**
+**RuVector (Knowledge Base)**
 ```json
-// Document structure
+// Document structure (stored in RuVector via async HTTP on port 6333)
 {
   "_id": "uuid",
   "url": "https://ee.show/episodes/...",
@@ -251,7 +254,7 @@ CREATE TABLE extraction_jobs (
     {
       "text": "Chunk content",
       "chunk_index": 0,
-      "embedding": "$vectorize"
+      "embedding": [0.012, -0.034, ...]
     }
   ],
   "metadata": {
@@ -285,7 +288,7 @@ CREATE TABLE extraction_jobs (
 * Hybrid search (lexical + semantic)
 * Reranking for accuracy
 ### Integration
-* Direct AstraDB integration
+* Direct RuVector integration
 * Brand-specific knowledge bases
 * Custom publication workflows
 ## Testing Strategy
@@ -296,7 +299,7 @@ CREATE TABLE extraction_jobs (
 **Integration Tests** (`tests/integration/`)
 * End-to-end extraction flows
 * Monitor scheduling and execution
-* AstraDB operations
+* RuVector operations
 **Performance Tests** (`tests/performance/`)
 * Concurrent extraction throughput
 * Memory usage under load
@@ -312,61 +315,58 @@ CREATE TABLE extraction_jobs (
 **Monitoring**: Prometheus metrics, Grafana dashboards
 **Logging**: Structured logging with correlation IDs
 ## RuVector Integration
+
+[RuVector](https://github.com/ruvnet/ruvector) is a Rust-based self-learning vector database designed by [Ruv](https://github.com/ruvnet). It runs as a single Rust/Axum service on port 6333, replacing the 3-service Milvus stack (etcd + MinIO + standalone).
+
 ### Installation
-```warp-runnable-command
-# Add RuVector as git submodule
-cd /Users/breydentaylor/operationTorque
-git submodule add https://github.com/ruvnet/ruvector.git vendor/ruvector
-git submodule update --init --recursive
-# Install RuVector npm packages
-cd intelligence-pipeline/backend
-npm install ruvector
-npm install @ruvector/sona  # SONA learning
-npm install @ruvector/ruvllm # LLM orchestration
-```
-### Python Bindings
-```warp-runnable-command
-# Install Rust RuVector crates (for Python bindings)
-cd vendor/ruvector
+```bash
+# Run RuVector as a Docker container
+docker run -d --name ruvector \
+  -p 6333:6333 \
+  -v ruvector_data:/data \
+  ghcr.io/ruvnet/ruvector:latest
+
+# Or build from source
+git clone https://github.com/ruvnet/ruvector.git
+cd ruvector
 cargo build --release
-# Python wrapper (in intelligence-pipeline/backend/src/ruvector/)
-pip install maturin
-maturin develop --manifest-path=../../vendor/ruvector/Cargo.toml
+./target/release/ruvector-server --port 6333 --data-dir /data
 ```
-### Usage Example
+
+### Python Client (Async HTTP via httpx)
 ```python
 # backend/src/ruvector/client.py
-import ruvector
-from ruvector import RuVector, EmbeddingConfig
+import httpx
+
 class RuVectorClient:
-    def __init__(self, data_dir: str):
-        self.db = RuVector(
-            data_dir=data_dir,
-            enable_gnn=True,  # Self-learning GNN layers
-            enable_graph=True # Graph queries
-        )
-    
+    def __init__(self, base_url: str = "http://localhost:6333"):
+        self.base_url = base_url
+        self.client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+
     async def insert_document(self, doc_id: str, text: str, metadata: dict):
-        # Automatic embedding + HNSW indexing
-        await self.db.insert(
-            id=doc_id,
-            text=text,
-            metadata=metadata
-        )
-    
+        """Insert document with automatic HNSW indexing."""
+        await self.client.post("/collections/websets/points", json={
+            "id": doc_id,
+            "text": text,
+            "metadata": metadata,
+        })
+
     async def hybrid_search(self, query: str, top_k: int = 10):
-        # Hybrid lexical + semantic search with GNN enhancement
-        results = await self.db.search(
-            query=query,
-            top_k=top_k,
-            enable_gnn=True,  # Use learned patterns
-            hybrid_alpha=0.7  # 70% semantic, 30% lexical
-        )
-        return results
-    
+        """Hybrid BM25 + HNSW vector + GNN-enhanced search."""
+        resp = await self.client.post("/collections/websets/search", json={
+            "query": query,
+            "top_k": top_k,
+            "enable_gnn": True,
+            "hybrid_alpha": 0.7,  # 70% semantic, 30% lexical
+        })
+        return resp.json()["results"]
+
     async def graph_query(self, cypher: str):
-        # Graph queries (Cypher-like syntax)
-        return await self.db.query(cypher)
+        """Cypher graph queries for entity relationships."""
+        resp = await self.client.post("/graph/query", json={
+            "cypher": cypher,
+        })
+        return resp.json()["results"]
 ```
 ## gitignore Updates
 Add to `/Users/breydentaylor/operationTorque/.gitignore`:

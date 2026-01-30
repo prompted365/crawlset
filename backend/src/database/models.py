@@ -54,7 +54,7 @@ class WebsetItem(Base):
     content_hash: Optional[str] = Column(String, nullable=True)
     item_metadata: Optional[Dict[str, Any]] = Column(JSON, nullable=True)
     enrichments: Optional[Dict[str, Any]] = Column(JSON, nullable=True)
-    milvus_doc_id: Optional[str] = Column(String, nullable=True)
+    ruvector_doc_id: Optional[str] = Column(String, nullable=True)
     created_at: datetime = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships

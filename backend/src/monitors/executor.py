@@ -30,6 +30,7 @@ class MonitorExecutor:
     def __init__(
         self,
         db_url: str = "sqlite+aiosqlite:///./data/websets.db",
+        ruvector_url: str = "http://localhost:6333",
         ruvector_data_dir: str = "./data/ruvector",
     ):
         """
@@ -37,18 +38,19 @@ class MonitorExecutor:
 
         Args:
             db_url: Database URL for webset manager
-            ruvector_data_dir: Data directory for RuVector
+            ruvector_url: RuVector Rust service URL
+            ruvector_data_dir: Unused, kept for backward compatibility
         """
         self.db_url = db_url
-        self.ruvector_data_dir = ruvector_data_dir
+        self.ruvector_url = ruvector_url
 
         # Initialize components
         self.manager = WebsetManager(db_url)
         self.search_executor = SearchExecutor(
-            ruvector_client=RuVectorClient(data_dir=ruvector_data_dir)
+            ruvector_client=RuVectorClient(ruvector_url=ruvector_url)
         )
         self.deduplicator = ContentDeduplicator()
-        self.ruvector_client = RuVectorClient(data_dir=ruvector_data_dir)
+        self.ruvector_client = RuVectorClient(ruvector_url=ruvector_url)
 
     async def execute_monitor(
         self,

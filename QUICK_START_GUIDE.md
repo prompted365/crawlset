@@ -267,7 +267,7 @@ print(f"Found {len(result['people'])} people")
 ```python
 import asyncio
 from src.websets import WebsetManager
-from src.milvus import create_client
+from src.ruvector.client import RuVectorClient
 
 async def create_ai_companies_webset():
     # Initialize

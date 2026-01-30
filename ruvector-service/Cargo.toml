@@ -1,0 +1,38 @@
+[package]
+name = "ruvector-server"
+version = "0.1.0"
+edition = "2021"
+description = "RuVector HTTP service - HNSW vector database with GNN, SONA, and Graph capabilities"
+license = "MIT"
+
+[[bin]]
+name = "ruvector-server"
+path = "src/main.rs"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["json", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Vector operations
+ndarray = "0.15"
+rand = "0.8"
+
+# HNSW index
+hnsw_rs = "0.3"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+dashmap = "5"

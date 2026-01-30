@@ -47,7 +47,7 @@ curl -X POST http://localhost:8000/api/monitors \
 
 ### Webset Management
 - 📦 **Collections** - Organize content by topic/entity
-- 🔍 **Hybrid Search** - Milvus vector + BM25 keyword search
+- 🔍 **Hybrid Search** - RuVector semantic + BM25 keyword search
 - 🔄 **Deduplication** - SHA256, SimHash, MinHash strategies
 - 💎 **Enrichments** - Company, person, content enrichers with LLM
 - 📊 **Analytics** - Trending topics, insights, entity graphs
@@ -64,11 +64,12 @@ curl -X POST http://localhost:8000/api/monitors \
 - 📊 **Flower UI** - Real-time task monitoring
 - 🎛️ **Resource Management** - Memory limits, connection pooling
 
-### Vector Storage
-- 🗄️ **Milvus Integration** - Production-grade vector database
-- 🔍 **Hybrid Search** - Semantic + keyword with configurable weighting
-- 🧠 **Embeddings** - sentence-transformers with Redis caching
-- 📈 **Scalable** - Horizontal scaling, distributed deployment
+### Vector Storage -- Powered by RuVector
+- 🗄️ **[RuVector](https://github.com/ruvnet/ruvector)** - Rust-based self-learning vector database (designed by [Ruv](https://github.com/ruvnet))
+- 🔍 **Hybrid Search** - HNSW + BM25 + GNN-enhanced retrieval with sub-millisecond latency
+- 🧠 **Self-Learning** - GNN layers and SONA optimization improve recall over time
+- 📈 **Graph Queries** - Cypher-based graph traversal for entity relationships
+- ⚡ **61us p50 Latency** - Rust/Axum server, 200MB per 1M vectors, single-service deployment
 
 ## 🚀 Quick Start
 
@@ -98,7 +99,7 @@ curl http://localhost:8000/health
 - 🎨 **Frontend**: http://localhost:3000
 - 📡 **API Docs**: http://localhost:8000/docs
 - 🌸 **Flower (Tasks)**: http://localhost:5555
-- 🗄️ **Milvus**: localhost:19530
+- 🗄️ **RuVector**: localhost:6333
 
 ## 📖 Usage Examples
 
@@ -177,21 +178,21 @@ for item in items:
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Frontend  │────▶│   Backend   │────▶│   Milvus    │
-│  React/TS   │     │   FastAPI   │     │   Vectors   │
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │
-                           ▼
-                    ┌─────────────┐     ┌─────────────┐
-                    │    Redis    │────▶│   Celery    │
-                    │   Broker    │     │   Workers   │
-                    └─────────────┘     └─────────────┘
-                           │
-                           ▼
-                    ┌─────────────┐
-                    │   SQLite    │
-                    │ Operational │
+│   Frontend  │────▶│   Backend   │────▶│  RuVector   │
+│  React/TS   │     │   FastAPI   │     │ Rust/Axum   │
+└─────────────┘     └─────────────┘     │  :6333      │
+                           │            └─────────────┘
+                           ▼             (single service
+                    ┌─────────────┐       HNSW + GNN +
+                    │    Redis    │       SONA + Graph)
+                    │   Broker    │
                     └─────────────┘
+                        │      │
+                        ▼      ▼
+                 ┌────────┐ ┌─────────┐
+                 │ Celery │ │ SQLite  │
+                 │Workers │ │Operatnl │
+                 └────────┘ └─────────┘
 ```
 
 ## 📊 Comparison
@@ -208,12 +209,26 @@ for item in items:
 | **Docker deployment** | ✅ | ❌ | ❌ | ⚠️ Complex |
 | **Graph operations** | ✅ | ❌ | ⚠️ Limited | ❌ |
 
+## ⚡ Powered by RuVector
+
+Crawlset's vector search is powered by **[RuVector](https://github.com/ruvnet/ruvector)**, a Rust-based self-learning vector database designed by [Ruv](https://github.com/ruvnet). RuVector replaces the traditional 3-service Milvus stack (etcd + MinIO + Standalone) with a **single high-performance service**.
+
+**Key capabilities:**
+- **HNSW Indexing** -- Sub-millisecond approximate nearest neighbor search
+- **GNN Self-Learning** -- Graph Neural Network layers that improve recall over time
+- **SONA Optimization** -- Self-Organizing Neural Architecture for adaptive index tuning
+- **Cypher Graph Queries** -- Traverse entity relationships with expressive graph queries
+- **61us p50 Latency** -- Rust/Axum server delivers consistent ultra-low latency
+- **200MB per 1M Vectors** -- Compact memory footprint for large-scale deployments
+
+The Python backend communicates with RuVector via async HTTP (`httpx`) to the Rust/Axum server on port `6333`. See the [RuVector Integration Guide](docs/RUVECTOR_INTEGRATION.md) for details.
+
 ## 📚 Documentation
 
 - [Quick Start Guide](QUICK_START_GUIDE.md) - Get running in 5 minutes
 - [System Summary](SYSTEM_SUMMARY.md) - Complete feature overview
 - [API Documentation](http://localhost:8000/docs) - Interactive Swagger docs
-- [Milvus Integration](docs/MILVUS_GUIDE.md) - Vector database deep dive
+- [RuVector Integration](docs/RUVECTOR_INTEGRATION.md) - Vector database deep dive
 - [Contributing Guide](CONTRIBUTING.md) - How to contribute
 - [Deployment Guide](DEPLOYMENT.md) - Production deployment
 
@@ -224,7 +239,7 @@ for item in items:
 - Playwright - Browser automation
 - Celery - Distributed task queue
 - SQLAlchemy - ORM with SQLite/PostgreSQL
-- Milvus - Vector database
+- [RuVector](https://github.com/ruvnet/ruvector) - Rust-based self-learning vector database
 - sentence-transformers - Embeddings
 
 **Frontend**
@@ -265,7 +280,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - [Firecrawl](https://firecrawl.dev) - Inspiration for advanced crawling
 - [Exa](https://exa.ai) - Inspiration for webset management
-- [Milvus](https://milvus.io) - Vector database foundation
+- [RuVector](https://github.com/ruvnet/ruvector) - Rust-based vector database (designed by [Ruv](https://github.com/ruvnet))
 - [Playwright](https://playwright.dev) - Browser automation
 - [FastAPI](https://fastapi.tiangolo.com) - API framework
 

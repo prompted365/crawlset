@@ -1,35 +1,38 @@
 """
-RuVector integration for the intelligence pipeline.
+RuVector - Rust-Based Vector Database Integration for Crawlset.
 
-Provides vector database capabilities with hybrid search, graph operations,
-and automatic embedding generation.
+Communicates with the RuVector Rust/Axum service via async HTTP (httpx).
+Provides HNSW vector indexing, GNN self-learning, SONA optimization,
+Cypher-like graph queries, and hybrid search (BM25 + semantic).
 
-Main Components:
-- RuVectorClient: Core client for document storage and retrieval
-- EmbeddingGenerator: Text embedding with caching
-- HybridSearchEngine: Combined lexical and semantic search
-- GraphOperations: Knowledge graph features
+Components:
+- RuVectorClient: Async HTTP client for the RuVector Rust service
+- EmbeddingGenerator: Sentence-transformers with Redis caching (Python-side)
+- HybridSearchEngine: Combined lexical + semantic search
+- GraphOperations: Delegates to RuVector Rust graph endpoints
 
-Example usage:
+Architecture:
+    FastAPI Backend  ──httpx async──>  RuVector (Rust/Axum)
+    Python 3.11                        HNSW + GNN + SONA
+                                       Cypher Graph Queries
+                                       61us p50 latency
 
+Usage:
     from ruvector import create_client, create_search_engine
 
-    # Create and initialize client
-    client = await create_client(
-        data_dir="./data/ruvector",
-        embedding_model="all-MiniLM-L6-v2",
-        redis_url="redis://localhost:6379/0"
-    )
+    # Create and initialize client (connects to Rust service)
+    client = await create_client(ruvector_url="http://ruvector:6333")
 
     # Insert documents
     await client.insert_document(
         doc_id="doc1",
         text="Example document text",
-        metadata={"source": "web", "url": "https://example.com"}
+        metadata={"source": "web", "url": "https://example.com"},
+        embedding=[0.1, 0.2, ...]  # pre-computed via embedder.py
     )
 
     # Search
-    results = await client.hybrid_search("query text", top_k=10)
+    results = await client.hybrid_search(embedding=[...], top_k=10)
 
     # Use hybrid search engine
     search_engine = await create_search_engine(client, alpha=0.5)
@@ -40,6 +43,10 @@ Example usage:
     graph = await create_graph(client)
     await graph.build_graph_from_documents()
     clusters = await graph.find_clusters()
+
+    # SONA & GNN (Operation Torque)
+    await client.send_sona_trajectory({"pattern": "...", "success": True})
+    await client.train_gnn([{"query": "...", "clicked": "doc1"}])
 
     # Cleanup
     await client.close()
@@ -68,4 +75,4 @@ __all__ = [
     "create_graph",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

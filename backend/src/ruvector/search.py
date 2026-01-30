@@ -168,23 +168,20 @@ class HybridSearchEngine:
 
         logger.info(f"Initialized HybridSearchEngine with alpha={alpha}")
 
-    async def index_documents(self) -> None:
-        """Index all documents in the client for BM25 search."""
-        if not self.client._initialized:
-            await self.client.initialize()
+    async def index_documents(self, documents: Optional[List[Dict[str, Any]]] = None) -> None:
+        """
+        Index documents for BM25 search.
 
-        # Get all documents
-        documents = [
-            {"id": doc_id, "text": doc["text"]}
-            for doc_id, doc in self.client._documents.items()
-        ]
-
+        Args:
+            documents: List of dicts with 'id' and 'text' fields.
+                       If not provided, BM25 indexing is skipped (vector-only mode).
+        """
         if documents:
             self.bm25.index_documents(documents)
             self._indexed = True
             logger.info(f"Indexed {len(documents)} documents for hybrid search")
         else:
-            logger.warning("No documents to index")
+            logger.info("No documents provided for BM25 indexing, using vector-only mode")
 
     async def search(
         self,
@@ -245,10 +242,10 @@ class HybridSearchEngine:
             :top_k
         ]
 
-        # Build result objects
+        # Build result objects by fetching documents from RuVector service
         results = []
         for doc_id, score in top_ids:
-            doc = self.client._documents.get(doc_id)
+            doc = await self.client.get_document(doc_id)
             if doc:
                 # Apply metadata filtering if specified
                 if filter_metadata:
@@ -260,7 +257,7 @@ class HybridSearchEngine:
 
                 results.append({
                     "id": doc_id,
-                    "text": doc["text"],
+                    "text": doc.get("text", ""),
                     "metadata": doc.get("metadata", {}),
                     "score": float(score),
                 })
@@ -362,14 +359,14 @@ class HybridSearchEngine:
         Returns:
             List of similar documents
         """
-        # Get the source document
-        doc = self.client._documents.get(doc_id)
+        # Get the source document from RuVector service
+        doc = await self.client.get_document(doc_id)
         if not doc:
             return []
 
         # Use the document text as the query
         return await self.search(
-            query=doc["text"],
+            query=doc.get("text", ""),
             top_k=top_k + 1,  # +1 because source doc will be in results
             filter_metadata=filter_metadata,
         )
@@ -416,14 +413,14 @@ class HybridSearchEngine:
             :top_k
         ]
 
-        # Build result objects
+        # Build result objects by fetching from RuVector service
         results = []
         for doc_id, score in top_ids:
-            doc = self.client._documents.get(doc_id)
+            doc = await self.client.get_document(doc_id)
             if doc:
                 results.append({
                     "id": doc_id,
-                    "text": doc["text"],
+                    "text": doc.get("text", ""),
                     "metadata": doc.get("metadata", {}),
                     "score": float(score),
                 })
