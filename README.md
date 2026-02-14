@@ -1,4 +1,6 @@
-# 🕸️ Crawlset
+# 🕸️ Crawlset (Intelligence Pipeline)
+
+**Part of the [operationTorque](../../README.md) system**
 
 <div align="center">
 
