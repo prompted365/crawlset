@@ -1,6 +1,6 @@
 # Multi-stage Rust build for RuVector service
 # Stage 1: Build the Rust binary
-FROM rust:1.77-bookworm AS builder
+FROM rust:1.85-bookworm AS builder
 
 WORKDIR /build
 
