@@ -12,7 +12,8 @@ use axum::{
     Json, Router,
 };
 use dashmap::DashMap;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env, net::SocketAddr, sync::Arc};
 use tower_http::cors::CorsLayer;
@@ -30,6 +31,12 @@ struct Document {
     metadata: serde_json::Value,
     embedding: Vec<f32>,
     created_at: String,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    lineage_depth: u32,
+    #[serde(default)]
+    collection: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +54,261 @@ struct GraphEdge {
 }
 
 // ---------------------------------------------------------------------------
+// Persistence (SQLite WAL)
+// ---------------------------------------------------------------------------
+
+struct Persistence {
+    conn: Mutex<Connection>,
+}
+
+impl Persistence {
+    fn open(data_dir: &str) -> Result<Self, rusqlite::Error> {
+        let path = std::path::Path::new(data_dir).join("ruvector.db");
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let conn = Connection::open(&path)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        let store = Self {
+            conn: Mutex::new(conn),
+        };
+        store.create_tables()?;
+        info!(path = %path.display(), "Opened persistence store");
+        Ok(store)
+    }
+
+    fn create_tables(&self) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS documents (
+                id TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                embedding BLOB NOT NULL,
+                created_at TEXT NOT NULL,
+                parent_id TEXT,
+                lineage_depth INTEGER NOT NULL DEFAULT 0,
+                collection TEXT
+            );
+            CREATE TABLE IF NOT EXISTS collections (
+                name TEXT PRIMARY KEY,
+                dimension INTEGER NOT NULL DEFAULT 384,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS graph_nodes (
+                id TEXT PRIMARY KEY,
+                properties TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                target TEXT NOT NULL,
+                edge_type TEXT NOT NULL,
+                properties TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_edges_source ON graph_edges(source);
+            CREATE INDEX IF NOT EXISTS idx_edges_target ON graph_edges(target);
+            CREATE INDEX IF NOT EXISTS idx_docs_collection ON documents(collection);
+            CREATE INDEX IF NOT EXISTS idx_docs_parent ON documents(parent_id);",
+        )?;
+        Ok(())
+    }
+
+    fn save_document(&self, doc: &Document) {
+        let conn = self.conn.lock();
+        let embedding_bytes = embedding_to_bytes(&doc.embedding);
+        let metadata_str = serde_json::to_string(&doc.metadata).unwrap_or_default();
+        if let Err(e) = conn.execute(
+            "INSERT OR REPLACE INTO documents (id, text, metadata, embedding, created_at, parent_id, lineage_depth, collection)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                doc.id,
+                doc.text,
+                metadata_str,
+                embedding_bytes,
+                doc.created_at,
+                doc.parent_id,
+                doc.lineage_depth,
+                doc.collection,
+            ],
+        ) {
+            warn!(error = %e, doc_id = %doc.id, "Failed to persist document");
+        }
+    }
+
+    fn delete_document(&self, doc_id: &str) {
+        let conn = self.conn.lock();
+        if let Err(e) = conn.execute("DELETE FROM documents WHERE id = ?1", params![doc_id]) {
+            warn!(error = %e, doc_id = %doc_id, "Failed to delete persisted document");
+        }
+    }
+
+    fn save_collection(&self, meta: &CollectionMeta) {
+        let conn = self.conn.lock();
+        if let Err(e) = conn.execute(
+            "INSERT OR REPLACE INTO collections (name, dimension, created_at)
+             VALUES (?1, ?2, ?3)",
+            params![meta.name, meta.dimension, meta.created_at],
+        ) {
+            warn!(error = %e, name = %meta.name, "Failed to persist collection");
+        }
+    }
+
+    fn delete_collection(&self, name: &str) {
+        let conn = self.conn.lock();
+        if let Err(e) = conn.execute("DELETE FROM collections WHERE name = ?1", params![name]) {
+            warn!(error = %e, name = %name, "Failed to delete persisted collection");
+        }
+    }
+
+    fn save_graph_node(&self, node: &GraphNode) {
+        let conn = self.conn.lock();
+        let props = serde_json::to_string(&node.properties).unwrap_or_default();
+        if let Err(e) = conn.execute(
+            "INSERT OR REPLACE INTO graph_nodes (id, properties) VALUES (?1, ?2)",
+            params![node.id, props],
+        ) {
+            warn!(error = %e, id = %node.id, "Failed to persist graph node");
+        }
+    }
+
+    fn save_graph_edge(&self, edge: &GraphEdge) {
+        let conn = self.conn.lock();
+        let props = serde_json::to_string(&edge.properties).unwrap_or_default();
+        if let Err(e) = conn.execute(
+            "INSERT INTO graph_edges (source, target, edge_type, properties) VALUES (?1, ?2, ?3, ?4)",
+            params![edge.source, edge.target, edge.edge_type, props],
+        ) {
+            warn!(error = %e, "Failed to persist graph edge");
+        }
+    }
+
+    fn clear_graph(&self) {
+        let conn = self.conn.lock();
+        let _ = conn.execute_batch("DELETE FROM graph_nodes; DELETE FROM graph_edges;");
+    }
+
+    fn load_documents(&self) -> Vec<Document> {
+        let conn = self.conn.lock();
+        let mut stmt = match conn.prepare(
+            "SELECT id, text, metadata, embedding, created_at, parent_id, lineage_depth, collection FROM documents",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "Failed to load documents");
+                return Vec::new();
+            }
+        };
+        let result: Vec<Document> = stmt
+            .query_map([], |row| {
+                let metadata_str: String = row.get(2)?;
+                let embedding_bytes: Vec<u8> = row.get(3)?;
+                Ok(Document {
+                    id: row.get(0)?,
+                    text: row.get(1)?,
+                    metadata: serde_json::from_str(&metadata_str)
+                        .unwrap_or(serde_json::Value::Null),
+                    embedding: bytes_to_embedding(&embedding_bytes),
+                    created_at: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    lineage_depth: row.get::<_, u32>(6).unwrap_or(0),
+                    collection: row.get(7)?,
+                })
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+        result
+    }
+
+    fn load_collections(&self) -> Vec<CollectionMeta> {
+        let conn = self.conn.lock();
+        let mut stmt = match conn.prepare("SELECT name, dimension, created_at FROM collections") {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "Failed to load collections");
+                return Vec::new();
+            }
+        };
+        let result: Vec<CollectionMeta> = stmt
+            .query_map([], |row| {
+                Ok(CollectionMeta {
+                    name: row.get(0)?,
+                    dimension: row.get(1)?,
+                    document_count: 0,
+                    created_at: row.get(2)?,
+                })
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+        result
+    }
+
+    fn load_graph_nodes(&self) -> Vec<GraphNode> {
+        let conn = self.conn.lock();
+        let mut stmt = match conn.prepare("SELECT id, properties FROM graph_nodes") {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "Failed to load graph nodes");
+                return Vec::new();
+            }
+        };
+        let result: Vec<GraphNode> = stmt
+            .query_map([], |row| {
+                let props_str: String = row.get(1)?;
+                Ok(GraphNode {
+                    id: row.get(0)?,
+                    properties: serde_json::from_str(&props_str)
+                        .unwrap_or(serde_json::Value::Null),
+                })
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+        result
+    }
+
+    fn load_graph_edges(&self) -> Vec<GraphEdge> {
+        let conn = self.conn.lock();
+        let mut stmt = match conn.prepare(
+            "SELECT source, target, edge_type, properties FROM graph_edges",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "Failed to load graph edges");
+                return Vec::new();
+            }
+        };
+        let result: Vec<GraphEdge> = stmt
+            .query_map([], |row| {
+                let props_str: String = row.get(3)?;
+                Ok(GraphEdge {
+                    source: row.get(0)?,
+                    target: row.get(1)?,
+                    edge_type: row.get(2)?,
+                    properties: serde_json::from_str(&props_str)
+                        .unwrap_or(serde_json::Value::Null),
+                })
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+        result
+    }
+}
+
+fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
+    embedding
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect()
+}
+
+fn bytes_to_embedding(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // Application state
 // ---------------------------------------------------------------------------
 
@@ -55,7 +317,7 @@ struct AppState {
     collections: DashMap<String, CollectionMeta>,
     graph_nodes: DashMap<String, GraphNode>,
     graph_edges: RwLock<Vec<GraphEdge>>,
-    data_dir: String,
+    persistence: Persistence,
     sona_trajectories: RwLock<Vec<serde_json::Value>>,
     gnn_interactions: RwLock<Vec<serde_json::Value>>,
 }
@@ -87,6 +349,8 @@ struct InsertDocReq {
     metadata: Option<serde_json::Value>,
     embedding: Vec<f32>,
     collection: Option<String>,
+    parent_id: Option<String>,
+    lineage_depth: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -136,6 +400,14 @@ struct GetNeighborsQuery {
 }
 
 #[derive(Deserialize)]
+struct CreateEdgeReq {
+    source: String,
+    target: String,
+    edge_type: String,
+    properties: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
 struct SonaTrajectoryReq {
     trajectory: serde_json::Value,
 }
@@ -170,6 +442,7 @@ async fn create_collection(
         document_count: 0,
         created_at: chrono::Utc::now().to_rfc3339(),
     };
+    state.persistence.save_collection(&meta);
     state.collections.insert(req.name.clone(), meta.clone());
     info!(collection = %req.name, "Created collection");
     (StatusCode::CREATED, Json(meta))
@@ -199,8 +472,7 @@ async fn delete_collection(
     Path(name): Path<String>,
 ) -> impl IntoResponse {
     state.collections.remove(&name);
-    // Remove documents belonging to this collection
-    state.documents.retain(|_, _| true); // keep all for now; real impl would filter
+    state.persistence.delete_collection(&name);
     StatusCode::NO_CONTENT
 }
 
@@ -213,24 +485,43 @@ async fn insert_document(
     Json(req): Json<InsertDocReq>,
 ) -> impl IntoResponse {
     let doc_id = req.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let col_name = req.collection.clone().unwrap_or_else(|| "default".into());
+
+    // Compute lineage_depth: if parent_id given and no explicit depth, look up parent
+    let lineage_depth = req.lineage_depth.unwrap_or_else(|| {
+        if let Some(ref pid) = req.parent_id {
+            state
+                .documents
+                .get(pid)
+                .map(|p| p.lineage_depth + 1)
+                .unwrap_or(1)
+        } else {
+            0
+        }
+    });
+
     let doc = Document {
         id: doc_id.clone(),
         text: req.text,
         metadata: req.metadata.unwrap_or(serde_json::Value::Null),
         embedding: req.embedding,
         created_at: chrono::Utc::now().to_rfc3339(),
+        parent_id: req.parent_id,
+        lineage_depth,
+        collection: Some(col_name.clone()),
     };
+
+    state.persistence.save_document(&doc);
     state.documents.insert(doc_id.clone(), doc);
 
     // Update collection count
-    let col_name = req.collection.unwrap_or_else(|| "default".into());
     if let Some(mut col) = state.collections.get_mut(&col_name) {
         col.document_count = state.documents.len();
     }
 
     (
         StatusCode::CREATED,
-        Json(serde_json::json!({ "id": doc_id })),
+        Json(serde_json::json!({ "id": doc_id, "lineage_depth": lineage_depth })),
     )
 }
 
@@ -238,21 +529,32 @@ async fn bulk_insert(
     State(state): State<SharedState>,
     Json(req): Json<BulkInsertReq>,
 ) -> impl IntoResponse {
+    let col_name = req.collection.unwrap_or_else(|| "default".into());
     let mut ids = Vec::with_capacity(req.documents.len());
     for doc_req in req.documents {
         let doc_id = doc_req.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let lineage_depth = doc_req.lineage_depth.unwrap_or_else(|| {
+            if let Some(ref pid) = doc_req.parent_id {
+                state.documents.get(pid).map(|p| p.lineage_depth + 1).unwrap_or(1)
+            } else {
+                0
+            }
+        });
         let doc = Document {
             id: doc_id.clone(),
             text: doc_req.text,
             metadata: doc_req.metadata.unwrap_or(serde_json::Value::Null),
             embedding: doc_req.embedding,
             created_at: chrono::Utc::now().to_rfc3339(),
+            parent_id: doc_req.parent_id,
+            lineage_depth,
+            collection: Some(doc_req.collection.unwrap_or_else(|| col_name.clone())),
         };
+        state.persistence.save_document(&doc);
         state.documents.insert(doc_id.clone(), doc);
         ids.push(doc_id);
     }
 
-    let col_name = req.collection.unwrap_or_else(|| "default".into());
     if let Some(mut col) = state.collections.get_mut(&col_name) {
         col.document_count = state.documents.len();
     }
@@ -269,7 +571,11 @@ async fn get_document(
             "id": doc.id,
             "text": doc.text,
             "metadata": doc.metadata,
+            "embedding": doc.embedding,
             "created_at": doc.created_at,
+            "parent_id": doc.parent_id,
+            "lineage_depth": doc.lineage_depth,
+            "collection": doc.collection,
         }))),
         None => Err((StatusCode::NOT_FOUND, "Document not found".to_string())),
     }
@@ -280,7 +586,10 @@ async fn delete_document(
     Path(doc_id): Path<String>,
 ) -> impl IntoResponse {
     match state.documents.remove(&doc_id) {
-        Some(_) => StatusCode::NO_CONTENT,
+        Some(_) => {
+            state.persistence.delete_document(&doc_id);
+            StatusCode::NO_CONTENT
+        }
         None => StatusCode::NOT_FOUND,
     }
 }
@@ -382,12 +691,13 @@ async fn build_graph(
 ) -> impl IntoResponse {
     let threshold = req.similarity_threshold.unwrap_or(0.7);
 
-    // Clear existing graph
+    // Clear existing graph (memory + persistence)
     state.graph_nodes.clear();
     {
         let mut edges = state.graph_edges.write();
         edges.clear();
     }
+    state.persistence.clear_graph();
 
     // Create nodes from documents
     for entry in state.documents.iter() {
@@ -399,6 +709,7 @@ async fn build_graph(
                 "metadata": doc.metadata,
             }),
         };
+        state.persistence.save_graph_node(&node);
         state.graph_nodes.insert(doc.id.clone(), node);
     }
 
@@ -414,12 +725,14 @@ async fn build_graph(
             ) {
                 let sim = cosine_similarity(&a.embedding, &b.embedding);
                 if sim >= threshold {
-                    new_edges.push(GraphEdge {
+                    let edge = GraphEdge {
                         source: doc_ids[i].clone(),
                         target: doc_ids[j].clone(),
                         edge_type: "SIMILAR_TO".into(),
                         properties: serde_json::json!({ "similarity": sim }),
-                    });
+                    };
+                    state.persistence.save_graph_edge(&edge);
+                    new_edges.push(edge);
                 }
             }
         }
@@ -576,6 +889,112 @@ async fn get_graph_stats(State(state): State<SharedState>) -> impl IntoResponse 
     }))
 }
 
+async fn get_lineage(
+    State(state): State<SharedState>,
+    Path(doc_id): Path<String>,
+) -> impl IntoResponse {
+    let max_depth: u32 = 64; // Parent chain cap per upstream spec
+    let mut chain = Vec::new();
+    let mut current_id = Some(doc_id.clone());
+    let mut depth = 0u32;
+
+    while let Some(ref id) = current_id {
+        if depth > max_depth {
+            break;
+        }
+        match state.documents.get(id) {
+            Some(doc) => {
+                chain.push(serde_json::json!({
+                    "id": doc.id,
+                    "parent_id": doc.parent_id,
+                    "lineage_depth": doc.lineage_depth,
+                    "collection": doc.collection,
+                    "created_at": doc.created_at,
+                }));
+                current_id = doc.parent_id.clone();
+                depth += 1;
+            }
+            None => {
+                // Parent not found — record broken link and stop
+                if depth > 0 {
+                    chain.push(serde_json::json!({
+                        "id": id,
+                        "error": "parent_not_found",
+                    }));
+                }
+                break;
+            }
+        }
+    }
+
+    if chain.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "Document not found".to_string()));
+    }
+
+    Ok(Json(serde_json::json!({
+        "doc_id": doc_id,
+        "chain_length": chain.len(),
+        "lineage": chain,
+    })))
+}
+
+async fn create_edge(
+    State(state): State<SharedState>,
+    Json(req): Json<CreateEdgeReq>,
+) -> impl IntoResponse {
+    let edge = GraphEdge {
+        source: req.source.clone(),
+        target: req.target.clone(),
+        edge_type: req.edge_type.clone(),
+        properties: req.properties.unwrap_or(serde_json::Value::Null),
+    };
+
+    // Ensure graph nodes exist for both endpoints (create stubs if missing)
+    for node_id in [&req.source, &req.target] {
+        if !state.graph_nodes.contains_key(node_id) {
+            let props = state
+                .documents
+                .get(node_id)
+                .map(|doc| {
+                    serde_json::json!({
+                        "text": doc.text,
+                        "metadata": doc.metadata,
+                    })
+                })
+                .unwrap_or(serde_json::json!({}));
+            let node = GraphNode {
+                id: node_id.clone(),
+                properties: props,
+            };
+            state.persistence.save_graph_node(&node);
+            state.graph_nodes.insert(node_id.clone(), node);
+        }
+    }
+
+    state.persistence.save_graph_edge(&edge);
+    {
+        let mut edges = state.graph_edges.write();
+        edges.push(edge);
+    }
+
+    info!(
+        source = %req.source,
+        target = %req.target,
+        edge_type = %req.edge_type,
+        "Created graph edge"
+    );
+
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "source": req.source,
+            "target": req.target,
+            "edge_type": req.edge_type,
+            "status": "created",
+        })),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Handlers — SONA & GNN
 // ---------------------------------------------------------------------------
@@ -644,27 +1063,67 @@ async fn main() {
 
     info!(host = %host, port = %port, data_dir = %data_dir, "Starting RuVector server");
 
-    // Initialize state with default collection
-    let state = Arc::new(AppState {
-        documents: DashMap::new(),
-        collections: DashMap::new(),
-        graph_nodes: DashMap::new(),
-        graph_edges: RwLock::new(Vec::new()),
-        data_dir,
-        sona_trajectories: RwLock::new(Vec::new()),
-        gnn_interactions: RwLock::new(Vec::new()),
-    });
+    // Open persistence store
+    let persistence = Persistence::open(&data_dir).expect("Failed to open persistence store");
 
-    // Create default "crawlset" collection
-    state.collections.insert(
-        "crawlset".into(),
-        CollectionMeta {
+    // Load persisted data
+    let documents = DashMap::new();
+    let collections = DashMap::new();
+    let graph_nodes = DashMap::new();
+
+    for doc in persistence.load_documents() {
+        documents.insert(doc.id.clone(), doc);
+    }
+    for col in persistence.load_collections() {
+        collections.insert(col.name.clone(), col);
+    }
+    for node in persistence.load_graph_nodes() {
+        graph_nodes.insert(node.id.clone(), node);
+    }
+    let persisted_edges = persistence.load_graph_edges();
+
+    info!(
+        documents = documents.len(),
+        collections = collections.len(),
+        graph_nodes = graph_nodes.len(),
+        graph_edges = persisted_edges.len(),
+        "Loaded persisted state"
+    );
+
+    // Update collection document counts from loaded data
+    // Collect keys first to avoid DashMap deadlock (iter + get_mut on same map)
+    let col_names: Vec<String> = collections.iter().map(|c| c.key().clone()).collect();
+    for name in &col_names {
+        let count = documents
+            .iter()
+            .filter(|d| d.collection.as_deref() == Some(name.as_str()))
+            .count();
+        if let Some(mut c) = collections.get_mut(name) {
+            c.document_count = count;
+        }
+    }
+
+    // Ensure default "crawlset" collection exists
+    if !collections.contains_key("crawlset") {
+        let meta = CollectionMeta {
             name: "crawlset".into(),
             dimension: 384,
             document_count: 0,
             created_at: chrono::Utc::now().to_rfc3339(),
-        },
-    );
+        };
+        persistence.save_collection(&meta);
+        collections.insert("crawlset".into(), meta);
+    }
+
+    let state = Arc::new(AppState {
+        documents,
+        collections,
+        graph_nodes,
+        graph_edges: RwLock::new(persisted_edges),
+        persistence,
+        sona_trajectories: RwLock::new(Vec::new()),
+        gnn_interactions: RwLock::new(Vec::new()),
+    });
 
     let app = Router::new()
         // Health & stats
@@ -673,14 +1132,14 @@ async fn main() {
         // Collections
         .route("/collections", post(create_collection).get(list_collections))
         .route(
-            "/collections/{name}",
+            "/collections/:name",
             get(get_collection).delete(delete_collection),
         )
         // Documents
         .route("/documents", post(insert_document))
         .route("/documents/bulk", post(bulk_insert))
         .route(
-            "/documents/{doc_id}",
+            "/documents/:doc_id",
             get(get_document).delete(delete_document),
         )
         // Search
@@ -690,8 +1149,11 @@ async fn main() {
         .route("/graph/build", post(build_graph))
         .route("/graph/path", post(find_path))
         .route("/graph/clusters", get(find_clusters))
-        .route("/graph/neighbors/{node_id}", get(get_neighbors))
+        .route("/graph/neighbors/:node_id", get(get_neighbors))
         .route("/graph/stats", get(get_graph_stats))
+        .route("/graph/edges", post(create_edge))
+        // Lineage
+        .route("/lineage/:doc_id", get(get_lineage))
         // SONA & GNN
         .route("/sona/trajectory", post(sona_trajectory))
         .route("/gnn/train", post(gnn_train))
