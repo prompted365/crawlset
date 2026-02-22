@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use dashmap::DashMap;
@@ -188,6 +188,22 @@ impl Persistence {
         let _ = conn.execute_batch("DELETE FROM graph_nodes; DELETE FROM graph_edges;");
     }
 
+    fn clear_graph_for_ids(&self, ids: &[String]) {
+        if ids.is_empty() {
+            return;
+        }
+        let conn = self.conn.lock();
+        // Build a comma-separated list of quoted IDs for SQL IN clause
+        let placeholders: Vec<String> = ids.iter().map(|id| format!("'{}'", id.replace('\'', "''"))).collect();
+        let in_clause = placeholders.join(",");
+        let delete_nodes = format!("DELETE FROM graph_nodes WHERE id IN ({})", in_clause);
+        let delete_edges = format!(
+            "DELETE FROM graph_edges WHERE source IN ({0}) OR target IN ({0})",
+            in_clause
+        );
+        let _ = conn.execute_batch(&format!("{};{};", delete_nodes, delete_edges));
+    }
+
     fn load_documents(&self) -> Vec<Document> {
         let conn = self.conn.lock();
         let mut stmt = match conn.prepare(
@@ -364,6 +380,7 @@ struct SearchReq {
     embedding: Vec<f32>,
     top_k: Option<usize>,
     collection: Option<String>,
+    #[allow(dead_code)]
     filter_metadata: Option<serde_json::Value>,
 }
 
@@ -599,6 +616,10 @@ async fn delete_document(
 // ---------------------------------------------------------------------------
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+    // Refuse to compare mismatched dimensions — zip() silently truncates
+    if a.len() != b.len() {
+        return 0.0;
+    }
     let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| (*x as f64) * (*y as f64)).sum();
     let mag_a: f64 = a.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
     let mag_b: f64 = b.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
@@ -617,6 +638,14 @@ async fn search(
     let mut scored: Vec<SearchResult> = state
         .documents
         .iter()
+        .filter(|entry| {
+            // Apply collection filter if specified
+            if let Some(ref col) = req.collection {
+                entry.value().collection.as_deref() == Some(col.as_str())
+            } else {
+                true
+            }
+        })
         .map(|entry| {
             let doc = entry.value();
             let score = cosine_similarity(&req.embedding, &doc.embedding);
@@ -691,43 +720,74 @@ async fn build_graph(
 ) -> impl IntoResponse {
     let threshold = req.similarity_threshold.unwrap_or(0.7);
 
-    // Clear existing graph (memory + persistence)
-    state.graph_nodes.clear();
-    {
-        let mut edges = state.graph_edges.write();
-        edges.clear();
-    }
-    state.persistence.clear_graph();
+    // Collect document IDs scoped to the requested collection
+    let scoped_doc_ids: Vec<String> = state
+        .documents
+        .iter()
+        .filter(|entry| {
+            if let Some(ref col) = req.collection {
+                entry.value().collection.as_deref() == Some(col.as_str())
+            } else {
+                true
+            }
+        })
+        .map(|e| e.key().clone())
+        .collect();
 
-    // Create nodes from documents
-    for entry in state.documents.iter() {
-        let doc = entry.value();
-        let node = GraphNode {
-            id: doc.id.clone(),
-            properties: serde_json::json!({
-                "text": doc.text,
-                "metadata": doc.metadata,
-            }),
-        };
-        state.persistence.save_graph_node(&node);
-        state.graph_nodes.insert(doc.id.clone(), node);
+    // Clear only the scoped nodes/edges (not the entire graph)
+    if req.collection.is_some() {
+        // Remove in-memory nodes for scoped docs
+        for id in &scoped_doc_ids {
+            state.graph_nodes.remove(id);
+        }
+        // Remove in-memory edges involving scoped docs
+        {
+            let mut edges = state.graph_edges.write();
+            edges.retain(|e| {
+                !scoped_doc_ids.contains(&e.source) && !scoped_doc_ids.contains(&e.target)
+            });
+        }
+        // Remove persisted nodes/edges for scoped docs
+        state.persistence.clear_graph_for_ids(&scoped_doc_ids);
+    } else {
+        // No collection filter — clear everything (legacy behavior)
+        state.graph_nodes.clear();
+        {
+            let mut edges = state.graph_edges.write();
+            edges.clear();
+        }
+        state.persistence.clear_graph();
     }
 
-    // Create edges based on similarity
-    let doc_ids: Vec<String> = state.documents.iter().map(|e| e.key().clone()).collect();
+    // Create nodes from scoped documents
+    for id in &scoped_doc_ids {
+        if let Some(doc) = state.documents.get(id) {
+            let node = GraphNode {
+                id: doc.id.clone(),
+                properties: serde_json::json!({
+                    "text": doc.text,
+                    "metadata": doc.metadata,
+                }),
+            };
+            state.persistence.save_graph_node(&node);
+            state.graph_nodes.insert(doc.id.clone(), node);
+        }
+    }
+
+    // Create edges based on similarity (only within scoped documents)
     let mut new_edges = Vec::new();
 
-    for i in 0..doc_ids.len() {
-        for j in (i + 1)..doc_ids.len() {
+    for i in 0..scoped_doc_ids.len() {
+        for j in (i + 1)..scoped_doc_ids.len() {
             if let (Some(a), Some(b)) = (
-                state.documents.get(&doc_ids[i]),
-                state.documents.get(&doc_ids[j]),
+                state.documents.get(&scoped_doc_ids[i]),
+                state.documents.get(&scoped_doc_ids[j]),
             ) {
                 let sim = cosine_similarity(&a.embedding, &b.embedding);
                 if sim >= threshold {
                     let edge = GraphEdge {
-                        source: doc_ids[i].clone(),
-                        target: doc_ids[j].clone(),
+                        source: scoped_doc_ids[i].clone(),
+                        target: scoped_doc_ids[j].clone(),
                         edge_type: "SIMILAR_TO".into(),
                         properties: serde_json::json!({ "similarity": sim }),
                     };
@@ -738,15 +798,16 @@ async fn build_graph(
         }
     }
 
-    let edge_count = new_edges.len();
+    let new_edge_count = new_edges.len();
     {
         let mut edges = state.graph_edges.write();
-        *edges = new_edges;
+        edges.extend(new_edges);
     }
 
     Json(serde_json::json!({
         "nodes": state.graph_nodes.len(),
-        "edges": edge_count,
+        "edges": new_edge_count,
+        "collection": req.collection,
     }))
 }
 
