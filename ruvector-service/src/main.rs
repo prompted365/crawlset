@@ -109,7 +109,20 @@ impl Persistence {
             CREATE INDEX IF NOT EXISTS idx_edges_source ON graph_edges(source);
             CREATE INDEX IF NOT EXISTS idx_edges_target ON graph_edges(target);
             CREATE INDEX IF NOT EXISTS idx_docs_collection ON documents(collection);
-            CREATE INDEX IF NOT EXISTS idx_docs_parent ON documents(parent_id);",
+            CREATE INDEX IF NOT EXISTS idx_docs_parent ON documents(parent_id);
+            CREATE TABLE IF NOT EXISTS document_feedback (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id TEXT NOT NULL,
+                feedback_type TEXT NOT NULL,
+                quality REAL,
+                methylation_before REAL NOT NULL,
+                methylation_after REAL NOT NULL,
+                context_id TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (document_id) REFERENCES documents(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_feedback_doc ON document_feedback(document_id);
+            CREATE INDEX IF NOT EXISTS idx_feedback_time ON document_feedback(created_at);",
         )?;
         Ok(())
     }
@@ -202,6 +215,64 @@ impl Persistence {
             in_clause
         );
         let _ = conn.execute_batch(&format!("{};{};", delete_nodes, delete_edges));
+    }
+
+    fn save_feedback(
+        &self,
+        document_id: &str,
+        feedback_type: &str,
+        quality: Option<f64>,
+        methylation_before: f64,
+        methylation_after: f64,
+        context_id: Option<&str>,
+    ) {
+        let conn = self.conn.lock();
+        if let Err(e) = conn.execute(
+            "INSERT INTO document_feedback (document_id, feedback_type, quality, methylation_before, methylation_after, context_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                document_id,
+                feedback_type,
+                quality,
+                methylation_before,
+                methylation_after,
+                context_id,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        ) {
+            warn!(error = %e, doc_id = %document_id, "Failed to persist feedback");
+        }
+    }
+
+    fn update_document_metadata(&self, doc_id: &str, metadata: &serde_json::Value) {
+        let conn = self.conn.lock();
+        let metadata_str = serde_json::to_string(metadata).unwrap_or_default();
+        if let Err(e) = conn.execute(
+            "UPDATE documents SET metadata = ?1 WHERE id = ?2",
+            params![metadata_str, doc_id],
+        ) {
+            warn!(error = %e, doc_id = %doc_id, "Failed to update document metadata");
+        }
+    }
+
+    fn count_feedback(&self, collection: Option<&str>) -> i64 {
+        let conn = self.conn.lock();
+        let count: i64 = if let Some(col) = collection {
+            conn.query_row(
+                "SELECT COUNT(*) FROM document_feedback df INNER JOIN documents d ON df.document_id = d.id WHERE d.collection = ?1",
+                params![col],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+        } else {
+            conn.query_row(
+                "SELECT COUNT(*) FROM document_feedback",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+        };
+        count
     }
 
     fn load_documents(&self) -> Vec<Document> {
@@ -382,6 +453,7 @@ struct SearchReq {
     collection: Option<String>,
     #[allow(dead_code)]
     filter_metadata: Option<serde_json::Value>,
+    decay_halflife_hours: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -390,6 +462,7 @@ struct SearchResult {
     text: String,
     metadata: serde_json::Value,
     score: f64,
+    raw_score: f64,
 }
 
 #[derive(Deserialize)]
@@ -422,6 +495,24 @@ struct CreateEdgeReq {
     target: String,
     edge_type: String,
     properties: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct FeedbackReq {
+    feedback_type: String,
+    quality: Option<f64>,
+    context_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MethylationStats {
+    collection: String,
+    total_docs: usize,
+    mean_methylation: f64,
+    fully_active: usize,
+    partially_silenced: usize,
+    mostly_silenced: usize,
+    feedback_count: i64,
 }
 
 #[derive(Deserialize)]
@@ -634,6 +725,7 @@ async fn search(
     Json(req): Json<SearchReq>,
 ) -> impl IntoResponse {
     let top_k = req.top_k.unwrap_or(10);
+    let now = chrono::Utc::now();
 
     let mut scored: Vec<SearchResult> = state
         .documents
@@ -648,17 +740,53 @@ async fn search(
         })
         .map(|entry| {
             let doc = entry.value();
-            let score = cosine_similarity(&req.embedding, &doc.embedding);
+            let raw_score = cosine_similarity(&req.embedding, &doc.embedding);
+
+            // Methylation-weighted scoring
+            let methylation = doc
+                .metadata
+                .get("methylation_score")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
+
+            // Temporal decay: old methylation marks fade toward 0
+            let effective_methylation = if let Some(halflife) = req.decay_halflife_hours {
+                if halflife > 0.0 {
+                    if let Some(last_adj) = doc.metadata.get("methylation_last_adjusted").and_then(|v| v.as_str()) {
+                        if let Ok(last_time) = chrono::DateTime::parse_from_rfc3339(last_adj) {
+                            let elapsed_hours = (now - last_time.with_timezone(&chrono::Utc))
+                                .num_seconds() as f64
+                                / 3600.0;
+                            let elapsed_halflives = elapsed_hours / halflife;
+                            let decay_factor = 0.5_f64.powf(elapsed_halflives);
+                            methylation * decay_factor
+                        } else {
+                            methylation
+                        }
+                    } else {
+                        methylation
+                    }
+                } else {
+                    methylation
+                }
+            } else {
+                methylation
+            };
+
+            let weighted_score = raw_score * (1.0 - effective_methylation);
+
             SearchResult {
                 id: doc.id.clone(),
                 text: doc.text.clone(),
                 metadata: doc.metadata.clone(),
-                score,
+                score: weighted_score,
+                raw_score,
             }
         })
         .collect();
 
-    // Sort by score descending
+    // Sort by weighted score descending
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(top_k);
 
@@ -1057,6 +1185,156 @@ async fn create_edge(
 }
 
 // ---------------------------------------------------------------------------
+// Handlers — Methylation Feedback
+// ---------------------------------------------------------------------------
+
+async fn document_feedback(
+    State(state): State<SharedState>,
+    Path(doc_id): Path<String>,
+    Json(req): Json<FeedbackReq>,
+) -> impl IntoResponse {
+    let doc = match state.documents.get(&doc_id) {
+        Some(d) => d.clone(),
+        None => return Err((StatusCode::NOT_FOUND, "Document not found".to_string())),
+    };
+
+    let current_methylation = doc
+        .metadata
+        .get("methylation_score")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+
+    // Max methylation: civilization priors get resistance cap (default 1.0)
+    let max_methylation = doc
+        .metadata
+        .get("methylation_resistance")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+
+    let new_methylation = match req.feedback_type.as_str() {
+        "grounded" => {
+            // Demethylate 10% — reward usefulness (like Olffr151 hypomethylation)
+            let factor = req.quality.unwrap_or(0.90).clamp(0.5, 0.99);
+            (current_methylation * factor).max(0.0)
+        }
+        "ignored" => {
+            // Methylate 5% — penalize noise
+            let increment = req.quality.map(|q| q * 0.1).unwrap_or(0.05);
+            (current_methylation + increment).min(max_methylation)
+        }
+        "retrieved" => {
+            // Neutral — just recording retrieval
+            current_methylation
+        }
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Unknown feedback_type: '{}'. Expected: grounded, ignored, retrieved", req.feedback_type),
+            ));
+        }
+    };
+
+    // Update document metadata atomically
+    let mut new_metadata = doc.metadata.clone();
+    if let Some(obj) = new_metadata.as_object_mut() {
+        obj.insert(
+            "methylation_score".to_string(),
+            serde_json::json!(new_methylation),
+        );
+        obj.insert(
+            "methylation_last_adjusted".to_string(),
+            serde_json::json!(chrono::Utc::now().to_rfc3339()),
+        );
+    }
+
+    // Update in-memory document
+    if let Some(mut entry) = state.documents.get_mut(&doc_id) {
+        entry.metadata = new_metadata.clone();
+    }
+
+    // Persist metadata update
+    state.persistence.update_document_metadata(&doc_id, &new_metadata);
+
+    // Audit trail
+    state.persistence.save_feedback(
+        &doc_id,
+        &req.feedback_type,
+        req.quality,
+        current_methylation,
+        new_methylation,
+        req.context_id.as_deref(),
+    );
+
+    info!(
+        doc_id = %doc_id,
+        feedback_type = %req.feedback_type,
+        methylation_before = %current_methylation,
+        methylation_after = %new_methylation,
+        "Methylation feedback applied"
+    );
+
+    Ok(Json(serde_json::json!({
+        "id": doc_id,
+        "feedback_type": req.feedback_type,
+        "methylation_before": current_methylation,
+        "methylation_after": new_methylation,
+        "max_methylation": max_methylation,
+    })))
+}
+
+async fn methylation_stats(
+    State(state): State<SharedState>,
+    Path(collection): Path<String>,
+) -> impl IntoResponse {
+    let mut total_docs = 0usize;
+    let mut methylation_sum = 0.0f64;
+    let mut fully_active = 0usize;
+    let mut partially_silenced = 0usize;
+    let mut mostly_silenced = 0usize;
+
+    for entry in state.documents.iter() {
+        let doc = entry.value();
+        if doc.collection.as_deref() != Some(collection.as_str()) {
+            continue;
+        }
+        total_docs += 1;
+        let score = doc
+            .metadata
+            .get("methylation_score")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        methylation_sum += score;
+        if score < 0.05 {
+            fully_active += 1;
+        } else if score < 0.50 {
+            partially_silenced += 1;
+        } else {
+            mostly_silenced += 1;
+        }
+    }
+
+    let mean = if total_docs > 0 {
+        methylation_sum / total_docs as f64
+    } else {
+        0.0
+    };
+
+    let feedback_count = state.persistence.count_feedback(Some(&collection));
+
+    Json(MethylationStats {
+        collection,
+        total_docs,
+        mean_methylation: (mean * 1000.0).round() / 1000.0,
+        fully_active,
+        partially_silenced,
+        mostly_silenced,
+        feedback_count,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Handlers — SONA & GNN
 // ---------------------------------------------------------------------------
 
@@ -1205,6 +1483,9 @@ async fn main() {
         )
         // Search
         .route("/search", post(search))
+        // Methylation feedback & stats
+        .route("/documents/:doc_id/feedback", post(document_feedback))
+        .route("/methylation/stats/:collection", get(methylation_stats))
         // Graph
         .route("/graph/query", post(graph_query))
         .route("/graph/build", post(build_graph))
