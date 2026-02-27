@@ -622,9 +622,9 @@ async fn insert_document(
     state.persistence.save_document(&doc);
     state.documents.insert(doc_id.clone(), doc);
 
-    // Update collection count
+    // Update collection count (filtered to this collection only)
     if let Some(mut col) = state.collections.get_mut(&col_name) {
-        col.document_count = state.documents.len();
+        col.document_count = state.documents.iter().filter(|d| d.collection.as_deref() == Some(&col_name)).count();
     }
 
     (
@@ -664,7 +664,7 @@ async fn bulk_insert(
     }
 
     if let Some(mut col) = state.collections.get_mut(&col_name) {
-        col.document_count = state.documents.len();
+        col.document_count = state.documents.iter().filter(|d| d.collection.as_deref() == Some(&col_name)).count();
     }
 
     Json(serde_json::json!({ "ids": ids, "count": ids.len() }))
