@@ -454,6 +454,7 @@ struct SearchReq {
     #[allow(dead_code)]
     filter_metadata: Option<serde_json::Value>,
     decay_halflife_hours: Option<f64>,
+    include_vectors: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -463,6 +464,8 @@ struct SearchResult {
     metadata: serde_json::Value,
     score: f64,
     raw_score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    embedding: Option<Vec<f32>>,
 }
 
 #[derive(Deserialize)]
@@ -725,6 +728,7 @@ async fn search(
     Json(req): Json<SearchReq>,
 ) -> impl IntoResponse {
     let top_k = req.top_k.unwrap_or(10);
+    let include_vectors = req.include_vectors.unwrap_or(false);
     let now = chrono::Utc::now();
 
     let mut scored: Vec<SearchResult> = state
@@ -782,6 +786,11 @@ async fn search(
                 metadata: doc.metadata.clone(),
                 score: weighted_score,
                 raw_score,
+                embedding: if include_vectors {
+                    Some(doc.embedding.clone())
+                } else {
+                    None
+                },
             }
         })
         .collect();
