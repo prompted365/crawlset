@@ -1,3 +1,11 @@
+name: crawlset-legacy
+
+# LEGACY / DEPRECATED DEFAULT
+# This compose file preserves the monolithic local stack for backwards compatibility.
+# It should not be the default operator surface when a split-role caller compose exists.
+# In operationTorque, use the repo-root docker-compose.web-intelligence.yml instead.
+# Keep this file only for explicit/manual fallback workflows.
+
 services:
   # Redis - Message broker and cache
   redis:
