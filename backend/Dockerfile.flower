@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements/ ./requirements/
+RUN pip install --no-cache-dir -r requirements/flower.txt
+
+# Only copy the queue module — flower needs celery_app but not the full source tree
+COPY src/ ./src/
+
+CMD ["celery", "-A", "src.queue.celery_app", "flower", "--port=5555"]

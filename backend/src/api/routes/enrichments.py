@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...database import get_db_session
 from ...database.models import WebsetItem, Webset
 from ...enrichments.engine import EnrichmentEngine
-from ...queue.tasks import enrich_item_task
 from ...config import get_settings
+# enrich_item_task is imported lazily inside each endpoint
+# to avoid pulling queue.tasks (and its heavy transitive deps) at API startup.
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -108,6 +109,7 @@ async def enrich_item(
         logger.info(f"Submitting enrichment job for item: {request.item_id}")
 
         # Submit Celery task
+        from ...queue.tasks import enrich_item_task  # lazy — keeps heavy deps out of startup
         task = enrich_item_task.delay(
             item_id=request.item_id,
             enrichment_types=request.plugin_names,
@@ -168,6 +170,7 @@ async def batch_enrich(
 
             # Submit enrichment task
             try:
+                from ...queue.tasks import enrich_item_task  # lazy
                 task = enrich_item_task.delay(
                     item_id=item_id,
                     enrichment_types=request.plugin_names,
@@ -255,6 +258,7 @@ async def enrich_webset(
 
         for item in items:
             try:
+                from ...queue.tasks import enrich_item_task  # lazy
                 enrich_item_task.delay(
                     item_id=item.id,
                     enrichment_types=request.plugin_names,

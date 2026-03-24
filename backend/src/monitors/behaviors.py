@@ -10,8 +10,8 @@ import logging
 from ..websets.manager import WebsetManager, WebsetItem
 from ..websets.search import SearchExecutor, SearchResult
 from ..websets.deduplication import ContentDeduplicator
-from ..crawler.browser import fetch_page
 from ..parser.trafilatura_parser import parse_html
+# fetch_page imported lazily inside methods that need it — keeps browser out of API startup
 from ..ruvector.client import RuVectorClient
 
 logger = logging.getLogger(__name__)

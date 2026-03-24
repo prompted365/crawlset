@@ -8,36 +8,10 @@ Provides Celery-based task queue infrastructure with:
 """
 
 from .celery_app import app
-from .tasks import (
-    extract_url_task,
-    batch_extract_task,
-    process_webset_task,
-    run_monitor_task,
-    enrich_item_task,
-    cleanup_expired_results,
-)
-from .workers import (
-    start_worker,
-    start_realtime_worker,
-    start_batch_worker,
-    start_background_worker,
-    get_worker_health,
-)
+# Tasks and workers are NOT eagerly imported here.
+# Tasks are auto-discovered via celery_app include=["src.queue.tasks"].
+# Import directly where needed to avoid pulling heavy deps into API startup.
 
 __all__ = [
-    # Celery app
     "app",
-    # Tasks
-    "extract_url_task",
-    "batch_extract_task",
-    "process_webset_task",
-    "run_monitor_task",
-    "enrich_item_task",
-    "cleanup_expired_results",
-    # Workers
-    "start_worker",
-    "start_realtime_worker",
-    "start_batch_worker",
-    "start_background_worker",
-    "get_worker_health",
 ]

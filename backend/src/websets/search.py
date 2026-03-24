@@ -8,7 +8,6 @@ import asyncio
 from datetime import datetime
 
 from ..ruvector.client import RuVectorClient
-from ..crawler.browser import fetch_page
 from ..parser.trafilatura_parser import parse_html
 from .deduplication import ContentDeduplicator
 
@@ -135,6 +134,7 @@ class SearchExecutor:
         async def crawl_one(url: str) -> Optional[SearchResult]:
             async with semaphore:
                 try:
+                    from ..crawler.browser import fetch_page  # lazy — workers only
                     html = await fetch_page(url, use_playwright=use_playwright)
                     parsed = parse_html(url, html)
 

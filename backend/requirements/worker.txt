@@ -1,0 +1,4 @@
+-r base.txt
+
+# Browser automation — workers only
+playwright==1.49.1

@@ -4,7 +4,6 @@ router = APIRouter()
 
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-from ...crawler.browser import fetch_page
 from ...parser.trafilatura_parser import parse_html
 from ...extractors.requesty_client import RequestyClient, RequestyError
 
@@ -18,6 +17,8 @@ class CrawlRequest(BaseModel):
 
 @router.post("/")
 async def crawl_and_extract(req: CrawlRequest):
+    # Lazy import — playwright only available in worker images
+    from ...crawler.browser import fetch_page
     html = await fetch_page(req.url, use_playwright=req.use_playwright)
     parsed = parse_html(req.url, html)
 

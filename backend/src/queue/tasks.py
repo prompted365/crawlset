@@ -24,7 +24,6 @@ from celery.exceptions import SoftTimeLimitExceeded, Retry
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .celery_app import app
-from ..crawler.browser import fetch_page
 from ..parser.trafilatura_parser import parse_html
 from ..preprocessing.chunker import chunk_text, ChunkingStrategy
 from ..preprocessing.cleaner import clean_content
@@ -100,6 +99,9 @@ def extract_url_task(self, url: str, job_id: Optional[str] = None, use_playwrigh
         self.update_state(state="PROGRESS", meta={"status": "fetching", "url": url})
 
         # Fetch page (async function, need to run in event loop)
+        # Lazy import — keeps Playwright out of beat/flower startup path
+        from ..crawler.browser import fetch_page
+
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:

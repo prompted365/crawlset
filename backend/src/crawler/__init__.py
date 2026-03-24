@@ -1,14 +1,8 @@
 """
 Web crawler module with advanced features.
 """
-from .browser import (
-    BrowserConfig,
-    BrowserPool,
-    FetchResult,
-    PlaywrightBrowser,
-    WaitStrategy,
-    fetch_page,
-)
+# browser imports are intentionally NOT re-exported here.
+# Import directly from src.crawler.browser where playwright is available.
 from .proxy_pool import (
     ProxyConfig,
     ProxyPool,
@@ -27,13 +21,6 @@ from .rate_limiter import (
 )
 
 __all__ = [
-    # Browser
-    "BrowserConfig",
-    "BrowserPool",
-    "FetchResult",
-    "PlaywrightBrowser",
-    "WaitStrategy",
-    "fetch_page",
     # Proxy Pool
     "ProxyConfig",
     "ProxyPool",

@@ -52,27 +52,14 @@ Usage:
     await client.close()
 """
 
+# Only the HTTP client is exported at package level.
+# embedder, search, and graph all require numpy/sentence-transformers.
+# Import those sub-modules directly in code that runs in worker images.
 from .client import RuVectorClient, create_client
-from .embedder import EmbeddingGenerator, create_embedder
-from .graph import GraphEdge, GraphNode, GraphOperations, create_graph
-from .search import BM25, HybridSearchEngine, create_search_engine
 
 __all__ = [
-    # Client
     "RuVectorClient",
     "create_client",
-    # Embedder
-    "EmbeddingGenerator",
-    "create_embedder",
-    # Search
-    "HybridSearchEngine",
-    "BM25",
-    "create_search_engine",
-    # Graph
-    "GraphOperations",
-    "GraphNode",
-    "GraphEdge",
-    "create_graph",
 ]
 
 __version__ = "0.2.0"
