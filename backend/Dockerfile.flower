@@ -9,7 +9,6 @@ RUN apt-get update && apt-get install -y \
 COPY requirements/ ./requirements/
 RUN pip install --no-cache-dir -r requirements/flower.txt
 
-# Only copy the queue module — flower needs celery_app but not the full source tree
-COPY src/ ./src/
-
-CMD ["celery", "-A", "src.queue.celery_app", "flower", "--port=5555"]
+# Flower does not import the celery app — it connects via broker URL directly.
+# This keeps all app source (and its transitive deps) out of the flower image.
+CMD ["sh", "-c", "celery --broker=${REDIS_URL} --result-backend=${REDIS_URL} flower --port=5555"]
