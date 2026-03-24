@@ -183,7 +183,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: intelligence-flower
-    command: celery -A src.queue.celery_app flower --port=5555
+    # broker-direct: avoids importing app code and its heavy transitive deps
+    command: sh -c "celery --broker=${REDIS_URL} flower --port=5555"
     ports:
       - "5555:5555"
     environment:
